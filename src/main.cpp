@@ -65,6 +65,7 @@ int main() {
     _putenv_s("GDAL_DATA", "C:\\vcpkg\\installed\\x64-windows\\share\\gdal");
     auto start = std::chrono::high_resolution_clock::now();
 
+    std::cout << "test";
 
     pdal::StageFactory factory;     ////stage
 
