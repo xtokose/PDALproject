@@ -1,0 +1,385 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{A7500A0A-4BFD-3ECE-8C5B-F3069758CBF1}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <VcpkgEnabled>false</VcpkgEnabled>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>MyPdalApp</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="do_not_import_user.props" Condition="exists('do_not_import_user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\C\PointReader\build\Debug\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MyPdalApp.dir\Debug\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">MyPdalApp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\C\PointReader\build\Release\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MyPdalApp.dir\Release\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MyPdalApp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\C\PointReader\build\MinSizeRel\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">MyPdalApp.dir\MinSizeRel\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">MyPdalApp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\C\PointReader\build\RelWithDebInfo\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">MyPdalApp.dir\RelWithDebInfo\</IntDir>
+    <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">MyPdalApp</TargetName>
+    <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.exe</TargetExt>
+    <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</LinkIncremental>
+    <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">true</GenerateManifest>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x64-windows/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <Optimization>Disabled</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;PDAL_DLL_EXPORT=1;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;PDAL_DLL_EXPORT=1;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>
+      </Message>
+      <Command>setlocal
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/C/PointReader/build/Debug/MyPdalApp.exe -installedDir C:/vcpkg/installed/x64-windows/debug/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\vcpkg\installed\x64-windows\debug\lib\pdalcpp.lib;ws2_32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/C/PointReader/build/Debug/MyPdalApp.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/C/PointReader/build/Debug/MyPdalApp.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x64-windows/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>
+      </Message>
+      <Command>setlocal
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/C/PointReader/build/Release/MyPdalApp.exe -installedDir C:/vcpkg/installed/x64-windows/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\vcpkg\installed\x64-windows\lib\pdalcpp.lib;ws2_32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/C/PointReader/build/Release/MyPdalApp.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/C/PointReader/build/Release/MyPdalApp.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <ClCompile>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x64-windows/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <Optimization>MinSpace</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+      <DebugInformationFormat>
+      </DebugInformationFormat>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>
+      </Message>
+      <Command>setlocal
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/C/PointReader/build/MinSizeRel/MyPdalApp.exe -installedDir C:/vcpkg/installed/x64-windows/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\vcpkg\installed\x64-windows\lib\pdalcpp.lib;ws2_32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/C/PointReader/build/MinSizeRel/MyPdalApp.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/C/PointReader/build/MinSizeRel/MyPdalApp.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <ClCompile>
+      <AdditionalOptions>%(AdditionalOptions) /external:I "C:/vcpkg/installed/x64-windows/include"</AdditionalOptions>
+      <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <Optimization>MaxSpeed</Optimization>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <UseFullPaths>false</UseFullPaths>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <ObjectFileName>$(IntDir)</ObjectFileName>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;PDAL_DLL_EXPORT=1;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Midl>
+      <AdditionalIncludeDirectories>C:\vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+    <PostBuildEvent>
+      <Message>
+      </Message>
+      <Command>setlocal
+C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy Bypass -file C:/vcpkg/scripts/buildsystems/msbuild/applocal.ps1 -targetBinary C:/C/PointReader/build/RelWithDebInfo/MyPdalApp.exe -installedDir C:/vcpkg/installed/x64-windows/bin -OutVariable out
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalDependencies>C:\vcpkg\installed\x64-windows\lib\pdalcpp.lib;ws2_32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
+      <ImportLibrary>C:/C/PointReader/build/RelWithDebInfo/MyPdalApp.lib</ImportLibrary>
+      <ProgramDataBaseFile>C:/C/PointReader/build/RelWithDebInfo/MyPdalApp.pdb</ProgramDataBaseFile>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <ProjectReference>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\C\PointReader\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/C/PointReader/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+C:\Qt\Tools\CMake_64\bin\cmake.exe -SC:/C/PointReader -BC:/C/PointReader/build --check-stamp-file C:/C/PointReader/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeCXXCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeRCCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCXXInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCommonLanguageInclude.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeDependentOption.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeGenericSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeInitializeConfigs.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeLanguageInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeRCInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInitialize.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\WindowsPaths.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfig.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfigVersion.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-debug.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-release.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets.cmake;C:\vcpkg\installed\x64-windows\share\pdal\pluginmacros.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\C\PointReader\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/C/PointReader/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+C:\Qt\Tools\CMake_64\bin\cmake.exe -SC:/C/PointReader -BC:/C/PointReader/build --check-stamp-file C:/C/PointReader/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeCXXCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeRCCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCXXInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCommonLanguageInclude.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeDependentOption.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeGenericSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeInitializeConfigs.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeLanguageInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeRCInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInitialize.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\WindowsPaths.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfig.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfigVersion.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-debug.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-release.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets.cmake;C:\vcpkg\installed\x64-windows\share\pdal\pluginmacros.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\C\PointReader\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/C/PointReader/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+C:\Qt\Tools\CMake_64\bin\cmake.exe -SC:/C/PointReader -BC:/C/PointReader/build --check-stamp-file C:/C/PointReader/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeCXXCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeRCCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCXXInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCommonLanguageInclude.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeDependentOption.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeGenericSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeInitializeConfigs.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeLanguageInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeRCInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInitialize.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\WindowsPaths.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfig.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfigVersion.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-debug.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-release.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets.cmake;C:\vcpkg\installed\x64-windows\share\pdal\pluginmacros.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\C\PointReader\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/C/PointReader/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+C:\Qt\Tools\CMake_64\bin\cmake.exe -SC:/C/PointReader -BC:/C/PointReader/build --check-stamp-file C:/C/PointReader/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeCXXCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeRCCompiler.cmake;C:\C\PointReader\build\CMakeFiles\3.24.2\CMakeSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCXXInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeCommonLanguageInclude.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeDependentOption.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeGenericSystem.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeInitializeConfigs.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeLanguageInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeRCInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInformation.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\CMakeSystemSpecificInitialize.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\CMakeCommonCompilerMacros.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Compiler\MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC-CXX.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows-MSVC.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\Windows.cmake;C:\Qt\Tools\CMake_64\share\cmake-3.24\Modules\Platform\WindowsPaths.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfig.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALConfigVersion.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-debug.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets-release.cmake;C:\vcpkg\installed\x64-windows\share\pdal\PDALTargets.cmake;C:\vcpkg\installed\x64-windows\share\pdal\pluginmacros.cmake;C:\vcpkg\scripts\buildsystems\vcpkg.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\C\PointReader\build\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="C:\C\PointReader\src\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="C:\C\PointReader\build\ZERO_CHECK.vcxproj">
+      <Project>{C17A5A32-0CAB-350D-8469-071F589D8126}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".gitignore" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

@@ -16,8 +16,10 @@
 #include <cmath>
 #include <chrono>
 #include <fstream>
+#include <algorithm>
+#include <numeric> 
 using namespace std;
-
+const double PI = 3.14159265359;
 
 struct BuildingPoint {
     double x, y, z;
@@ -111,13 +113,14 @@ int main() {
     
 
     
-    
+    double min, max, average;
+    vector<double> excludedZ;
 
         // count normals (only class-6 points)
-    std::vector<BuildingPoint> buildpoint;
-    std::size_t total = 0;
-    std::ofstream file("points.txt");
-    file << std::fixed << std::setprecision(3);
+    vector<BuildingPoint> buildpoint;
+    size_t total = 0;
+    ofstream file("points.txt");
+    file << fixed << setprecision(3);
     for (auto const& v : views)
     {
         total += v->size();
@@ -139,32 +142,120 @@ int main() {
             a.nz = nz;
             a.curvature = curv;
 
-            file << a.x << "," << a.y << "," << a.z << std::endl;
 
 
-            double ratio = 0.01;
-            if (nx > ratio) {
+            //file << a.x << "," << a.y << "," << a.z << std::endl;
+
+            double ratio_angle = 5;  // degrees
+            double ratio = sin(ratio_angle * PI / 180.0);
+            if (abs(nz) > ratio) {
                 buildpoint.push_back(a);
+                file << a.x << "," << a.y << "," << a.z << std::endl;
+            }
+            else {
+                excludedZ.push_back(abs(nz));
             }
 
         }
     }
     file.close();
 
-    std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
+    min = *min_element(excludedZ.begin(), excludedZ.end());
+    max = *max_element(excludedZ.begin(), excludedZ.end());
+    average = accumulate(excludedZ.begin(), excludedZ.end(), 0.0) / excludedZ.size();
+    cout << "min " << min << endl;
+    cout << "max " << max << endl;
+    cout << "average " << average << endl;
+
+    vector<vector<BuildingPoint>> roofs;
+    double ratio_angle = 5;  // degrees
+    double ratio = sin(ratio_angle * PI / 180.0);
+    bool sort = false;
+
+    for (int i = 0; i < buildpoint.size(); i++) {
+
+        for (int j = 0; j < roofs.size(); j++) {
+            for (int k = 0; k < roofs[j].size(); k++) {
+                if ((buildpoint[i].x == roofs[j][k].x) && (buildpoint[i].y == roofs[j][k].y) && (buildpoint[i].z == roofs[j][k].z) ){
+                    sort = false;
+                }
+                else {
+                    sort = true;
+                }
+
+            }
+
+        }
 
 
-        //printing first 10 points
-    for (int i = 0; i < 10; i++) {
-        std::cout << "point " << i << endl;
-        std::cout << "x: " << buildpoint[i].x << "   y: " << buildpoint[i].y << "   z: " << buildpoint[i].z << endl;
-        std::cout << "nx: " << buildpoint[i].nx << "   ny: " << buildpoint[i].ny << "   nz: " << buildpoint[i].nz << endl;
-        std::cout << "curvature " << buildpoint[i].curvature << endl << endl;
+        vector<BuildingPoint> group;
+        if (sort) {
+            
+            group.push_back(buildpoint[i]);
+
+            for (int j = i + 1; j < buildpoint.size() - 1; j++) {
+
+
+                double dot = buildpoint[i].nx * buildpoint[j].nx + buildpoint[i].ny * buildpoint[j].ny + buildpoint[i].nz * buildpoint[j].nz;
+                double magA = sqrt(buildpoint[i].nx * buildpoint[i].nx + buildpoint[i].ny * buildpoint[i].ny + buildpoint[i].nz * buildpoint[i].nz);
+                double magB = sqrt(buildpoint[j].nx * buildpoint[j].nx + buildpoint[j].ny * buildpoint[j].ny + buildpoint[j].nz * buildpoint[j].nz);
+
+                // Avoid division by zero
+                if (magA == 0 || magB == 0) {
+                    std::cerr << "One of the vectors has zero length.\n";
+                    return 1;
+                }
+
+                double cosTheta = dot / (magA * magB);
+                if (cosTheta > 1.0) cosTheta = 1.0;
+                if (cosTheta < -1.0) cosTheta = -1.0;
+
+                double angleRad = acos(cosTheta);
+                double angleDeg = angleRad * 180.0 / PI;
+
+
+                if (angleDeg < ratio_angle) {
+
+                    group.push_back(buildpoint[j]);
+                }
+            }
+        }
+        roofs.push_back(group);
 
     }
 
 
-    auto v = *views.begin();                 // first view
+    size_t amount = 0;
+    cout << "pocet group " << roofs.size() << endl;
+    for (int i = 0; i < roofs.size(); i++) {
+
+        amount = amount + roofs[i].size();
+
+    }
+    cout << "celkovy pocet bodov " << amount << endl;
+
+    std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
+        //printing first 10 points
+    for (int i = 0; i < 10; i++) {
+       /* std::cout << "point " << i << endl;
+        std::cout << "x: " << buildpoint[i].x << "   y: " << buildpoint[i].y << "   z: " << buildpoint[i].z << endl;
+        std::cout << "nx: " << buildpoint[i].nx << "   ny: " << buildpoint[i].ny << "   nz: " << buildpoint[i].nz << endl;
+        std::cout << "curvature " << buildpoint[i].curvature << endl << endl;*/
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+    //auto v = *views.begin();                 // first view
     //printSchema(table);
     //dumpFirstN(table, *v, 10);
 
