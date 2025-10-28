@@ -167,61 +167,92 @@ int main() {
     cout << "max " << max << endl;
     cout << "average " << average << endl;
 
+
+    vector<BuildingPoint> temp = buildpoint; //temporary vector from which we will pop out points with same group
     vector<vector<BuildingPoint>> roofs;
     double ratio_angle = 5;  // degrees
     double ratio = sin(ratio_angle * PI / 180.0);
-    bool sort = false;
+    bool sort = true;
 
-    for (int i = 0; i < buildpoint.size(); i++) {
+    size_t current_temp_size = temp.size();
 
-        for (int j = 0; j < roofs.size(); j++) {
-            for (int k = 0; k < roofs[j].size(); k++) {
-                if ((buildpoint[i].x == roofs[j][k].x) && (buildpoint[i].y == roofs[j][k].y) && (buildpoint[i].z == roofs[j][k].z) ){
-                    sort = false;
-                }
-                else {
-                    sort = true;
-                }
-
-            }
-
-        }
-
+    for (int i = 0; i < current_temp_size; i++) {
 
         vector<BuildingPoint> group;
-        if (sort) {
-            
-            group.push_back(buildpoint[i]);
-
-            for (int j = i + 1; j < buildpoint.size() - 1; j++) {
+        group.push_back(temp[i]);
 
 
-                double dot = buildpoint[i].nx * buildpoint[j].nx + buildpoint[i].ny * buildpoint[j].ny + buildpoint[i].nz * buildpoint[j].nz;
-                double magA = sqrt(buildpoint[i].nx * buildpoint[i].nx + buildpoint[i].ny * buildpoint[i].ny + buildpoint[i].nz * buildpoint[i].nz);
-                double magB = sqrt(buildpoint[j].nx * buildpoint[j].nx + buildpoint[j].ny * buildpoint[j].ny + buildpoint[j].nz * buildpoint[j].nz);
-
-                // Avoid division by zero
-                if (magA == 0 || magB == 0) {
-                    std::cerr << "One of the vectors has zero length.\n";
-                    return 1;
-                }
-
-                double cosTheta = dot / (magA * magB);
-                if (cosTheta > 1.0) cosTheta = 1.0;
-                if (cosTheta < -1.0) cosTheta = -1.0;
-
-                double angleRad = acos(cosTheta);
-                double angleDeg = angleRad * 180.0 / PI;
 
 
-                if (angleDeg < ratio_angle) {
 
-                    group.push_back(buildpoint[j]);
-                }
+        for (int j = i + 1; j < temp.size() - 1; j++) {
+
+
+            double dot = temp[i].nx * temp[j].nx + temp[i].ny * temp[j].ny + temp[i].nz * temp[j].nz;
+            double magA = sqrt(temp[i].nx * temp[i].nx + temp[i].ny * temp[i].ny + temp[i].nz * temp[i].nz);
+            double magB = sqrt(temp[j].nx * temp[j].nx + temp[j].ny * temp[j].ny + temp[j].nz * temp[j].nz);
+
+            // Avoid division by zero
+            if (magA == 0 || magB == 0) {
+                std::cerr << "One of the vectors has zero length.\n";
+                return 1;
+            }
+
+            double cosTheta = dot / (magA * magB);
+            if (cosTheta > 1.0) cosTheta = 1.0;
+            if (cosTheta < -1.0) cosTheta = -1.0;
+
+            double angleRad = acos(cosTheta);
+            double angleDeg = angleRad * 180.0 / PI;
+
+
+            if (angleDeg < ratio_angle) {
+
+                group.push_back(temp[j]);
+                temp.erase(temp.begin() + j);
+                j--;
             }
         }
         roofs.push_back(group);
+        current_temp_size = temp.size();
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+       /* if ((i % 1000) == 0) {
+            cout << i << endl;
+        }*/
+
+
+        //for (int j = 0; j < roofs.size(); j++) {
+        //    for (int k = 0; k < roofs[j].size(); k++) {
+        //        if ((buildpoint[i].x == roofs[j][k].x) && (buildpoint[i].y == roofs[j][k].y) && (buildpoint[i].z == roofs[j][k].z) ){
+        //            sort = false;
+        //        }
+        //        else {
+        //            sort = true;
+        //        }
+
+        //    }
+
+        //}
+
+
+        //vector<BuildingPoint> group;
+        //if (sort) {
+
+        //}
     }
 
 
@@ -233,6 +264,8 @@ int main() {
 
     }
     cout << "celkovy pocet bodov " << amount << endl;
+
+
 
     std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
         //printing first 10 points
