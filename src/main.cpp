@@ -18,7 +18,7 @@
 #include <fstream>
 #include <algorithm>
 #include <numeric> 
-using namespace std;
+
 const double PI = 3.14159265359;
 
 struct BuildingPoint {
@@ -29,7 +29,7 @@ struct BuildingPoint {
     double curvature;
 };
 
-
+using namespace std;
 
 //void Stage::setInput(Stage& prev);
 
@@ -170,33 +170,24 @@ int main() {
 
     vector<BuildingPoint> temp = buildpoint; //temporary vector from which we will pop out points with same group
     vector<vector<BuildingPoint>> roofs;
+
+
     double ratio_angle = 5;  // degrees
     double ratio = sin(ratio_angle * PI / 180.0);
-    bool sort = true;
-
     size_t current_temp_size = temp.size();
 
-    for (int i = 0; i < current_temp_size; i++) {
+    int size_of_group = 0;
+    while (temp.size() > 1) {
+        cout << "current_temp_size   " << current_temp_size << endl;
+
 
         vector<BuildingPoint> group;
-        group.push_back(temp[i]);
-
-
-
-
-
-        for (int j = i + 1; j < temp.size() - 1; j++) {
-
-
-            double dot = temp[i].nx * temp[j].nx + temp[i].ny * temp[j].ny + temp[i].nz * temp[j].nz;
+        group.push_back(temp[0]);
+        for (int i = 1; i < current_temp_size - size_of_group; i++) {
+            
+            double dot = temp[i].nx * temp[0].nx + temp[i].ny * temp[0].ny + temp[i].nz * temp[0].nz;
             double magA = sqrt(temp[i].nx * temp[i].nx + temp[i].ny * temp[i].ny + temp[i].nz * temp[i].nz);
-            double magB = sqrt(temp[j].nx * temp[j].nx + temp[j].ny * temp[j].ny + temp[j].nz * temp[j].nz);
-
-            // Avoid division by zero
-            if (magA == 0 || magB == 0) {
-                std::cerr << "One of the vectors has zero length.\n";
-                return 1;
-            }
+            double magB = sqrt(temp[0].nx * temp[0].nx + temp[0].ny * temp[0].ny + temp[0].nz * temp[0].nz);
 
             double cosTheta = dot / (magA * magB);
             if (cosTheta > 1.0) cosTheta = 1.0;
@@ -205,55 +196,31 @@ int main() {
             double angleRad = acos(cosTheta);
             double angleDeg = angleRad * 180.0 / PI;
 
-
             if (angleDeg < ratio_angle) {
 
-                group.push_back(temp[j]);
-                temp.erase(temp.begin() + j);
-                j--;
+                group.push_back(temp[i]);                         
+                temp.erase(temp.begin() + i);
+                i--;
+                size_of_group++;
             }
         }
-        roofs.push_back(group);
+
+        size_of_group = 0;
+        temp.erase(temp.begin());
         current_temp_size = temp.size();
+        roofs.push_back(group);
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-       /* if ((i % 1000) == 0) {
-            cout << i << endl;
-        }*/
-
-
-        //for (int j = 0; j < roofs.size(); j++) {
-        //    for (int k = 0; k < roofs[j].size(); k++) {
-        //        if ((buildpoint[i].x == roofs[j][k].x) && (buildpoint[i].y == roofs[j][k].y) && (buildpoint[i].z == roofs[j][k].z) ){
-        //            sort = false;
-        //        }
-        //        else {
-        //            sort = true;
-        //        }
-
-        //    }
-
-        //}
-
-
-        //vector<BuildingPoint> group;
-        //if (sort) {
-
-        //}
     }
+    if (temp.size() == 1) {
+        vector<BuildingPoint> group;
+        group.push_back(temp[0]);
+        roofs.push_back(group);
+    }
+    
+
+
+
 
 
     size_t amount = 0;
@@ -265,6 +232,13 @@ int main() {
     }
     cout << "celkovy pocet bodov " << amount << endl;
 
+
+    int group_number = 5;
+    for (int i = 0; i < roofs[group_number].size(); i++) {
+
+        cout << "nx   " << roofs[group_number][i].nx << " ny   " << roofs[group_number][i].ny << " nz   " << roofs[group_number][i].nz << endl;
+        cout << " " << endl;
+    }
 
 
     std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
