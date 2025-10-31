@@ -20,6 +20,7 @@
 #include <numeric> 
 
 const double PI = 3.14159265359;
+using namespace std;
 
 struct BuildingPoint {
     double x, y, z;
@@ -29,7 +30,7 @@ struct BuildingPoint {
     double curvature;
 };
 
-using namespace std;
+
 
 //void Stage::setInput(Stage& prev);
 
@@ -113,14 +114,19 @@ int main() {
     
 
     
-    double min, max, average;
-    vector<double> excludedZ;
+    
 
-        // count normals (only class-6 points)
+        //filter points based on angle and curvature (only class-6 points)
+    double raito_curvature = 0.1;                       //curv ratio
+    double ratio_angle = 20;                            //degree ratio
+
     vector<BuildingPoint> buildpoint;
     size_t total = 0;
-    ofstream file("points.txt");
-    file << fixed << setprecision(3);
+    double min, max, average;
+    vector<double> excludedZ;
+    ofstream file("buildpoints/building_points_without_" + to_string((int)(ratio_angle)) + "degrees_walls.txt");
+    file << fixed << setprecision(3);                          
+    double ratio = sin(ratio_angle * PI / 180.0);
     for (auto const& v : views)
     {
         total += v->size();
@@ -142,20 +148,15 @@ int main() {
             a.nz = nz;
             a.curvature = curv;
 
-
-
-            //file << a.x << "," << a.y << "," << a.z << std::endl;
-
-            double ratio_angle = 5;  // degrees
-            double ratio = sin(ratio_angle * PI / 180.0);
-            if (abs(nz) > ratio) {
-                buildpoint.push_back(a);
-                file << a.x << "," << a.y << "," << a.z << std::endl;
+            if (nz > ratio) {
+                if (curv < raito_curvature) {
+                    buildpoint.push_back(a);
+                    file << a.x << "," << a.y << "," << a.z << std::endl;
+                }             
             }
             else {
                 excludedZ.push_back(abs(nz));
             }
-
         }
     }
     file.close();
@@ -168,26 +169,28 @@ int main() {
     cout << "average " << average << endl;
 
 
-    vector<BuildingPoint> temp = buildpoint; //temporary vector from which we will pop out points with same group
+
+
+        //creating groups based on similar normals
+    ratio_angle = 5;    // degree ratio
+    vector<BuildingPoint> temporary_buildpoint = buildpoint; //temporary vector from which we will pop out points with same group
     vector<vector<BuildingPoint>> roofs;
+    ratio = sin(ratio_angle * PI / 180.0);
+    size_t current_temp_size = temporary_buildpoint.size();
+    int size_of_group = 0, id = 1;
+    while (temporary_buildpoint.size() > 1) {
+        ofstream file("roofs/roof" + to_string(id) + ".txt");
+        file << fixed << setprecision(3);
 
-
-    double ratio_angle = 5;  // degrees
-    double ratio = sin(ratio_angle * PI / 180.0);
-    size_t current_temp_size = temp.size();
-
-    int size_of_group = 0;
-    while (temp.size() > 1) {
-        cout << "current_temp_size   " << current_temp_size << endl;
 
 
         vector<BuildingPoint> group;
-        group.push_back(temp[0]);
+        group.push_back(temporary_buildpoint[0]);
         for (int i = 1; i < current_temp_size - size_of_group; i++) {
             
-            double dot = temp[i].nx * temp[0].nx + temp[i].ny * temp[0].ny + temp[i].nz * temp[0].nz;
-            double magA = sqrt(temp[i].nx * temp[i].nx + temp[i].ny * temp[i].ny + temp[i].nz * temp[i].nz);
-            double magB = sqrt(temp[0].nx * temp[0].nx + temp[0].ny * temp[0].ny + temp[0].nz * temp[0].nz);
+            double dot = temporary_buildpoint[i].nx * temporary_buildpoint[0].nx + temporary_buildpoint[i].ny * temporary_buildpoint[0].ny + temporary_buildpoint[i].nz * temporary_buildpoint[0].nz;
+            double magA = sqrt(temporary_buildpoint[i].nx * temporary_buildpoint[i].nx + temporary_buildpoint[i].ny * temporary_buildpoint[i].ny + temporary_buildpoint[i].nz * temporary_buildpoint[i].nz);
+            double magB = sqrt(temporary_buildpoint[0].nx * temporary_buildpoint[0].nx + temporary_buildpoint[0].ny * temporary_buildpoint[0].ny + temporary_buildpoint[0].nz * temporary_buildpoint[0].nz);
 
             double cosTheta = dot / (magA * magB);
             if (cosTheta > 1.0) cosTheta = 1.0;
@@ -198,23 +201,29 @@ int main() {
 
             if (angleDeg < ratio_angle) {
 
-                group.push_back(temp[i]);                         
-                temp.erase(temp.begin() + i);
+                group.push_back(temporary_buildpoint[i]);
+                file << temporary_buildpoint[i].x << "," << temporary_buildpoint[i].y << "," << temporary_buildpoint[i].z << std::endl;
+
+                temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
                 i--;
                 size_of_group++;
             }
         }
+        file.close();
+        cout << "size_of_roof " << id << " is " << size_of_group << endl;
+        id++;
 
+        
         size_of_group = 0;
-        temp.erase(temp.begin());
-        current_temp_size = temp.size();
+        temporary_buildpoint.erase(temporary_buildpoint.begin());
+        current_temp_size = temporary_buildpoint.size();
         roofs.push_back(group);
 
 
     }
-    if (temp.size() == 1) {
+    if (temporary_buildpoint.size() == 1) {
         vector<BuildingPoint> group;
-        group.push_back(temp[0]);
+        group.push_back(temporary_buildpoint[0]);
         roofs.push_back(group);
     }
     
@@ -244,7 +253,7 @@ int main() {
     std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
         //printing first 10 points
     for (int i = 0; i < 10; i++) {
-       /* std::cout << "point " << i << endl;
+        /*std::cout << "point " << i << endl;
         std::cout << "x: " << buildpoint[i].x << "   y: " << buildpoint[i].y << "   z: " << buildpoint[i].z << endl;
         std::cout << "nx: " << buildpoint[i].nx << "   ny: " << buildpoint[i].ny << "   nz: " << buildpoint[i].nz << endl;
         std::cout << "curvature " << buildpoint[i].curvature << endl << endl;*/
