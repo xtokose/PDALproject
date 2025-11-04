@@ -79,12 +79,18 @@ int main() {
     opts.add("filename", R"(LiDAR.laz)");
     reader->setOptions(opts);
 
+    
+
         //filtering class 6
     pdal::Stage* range = factory.createStage("filters.range");
     pdal::Options rng;
     rng.add("limits", "Classification[6:6]");
     range->setOptions(rng);
     range->setInput(*reader);
+
+    
+    //chrono::duration<double> elapsed = end - start;
+
 
         // Normal filter
     pdal::Stage* normal = factory.createStage("filters.normal");
@@ -97,8 +103,21 @@ int main() {
     pdal::PointTable table;
     normal->prepare(table);
     reader->prepare(table);
-    pdal::PointViewSet views = normal->execute(table);
     pdal::PointViewSet views_all = reader->execute(table);
+            ////TIME
+    auto current_time = chrono::high_resolution_clock::now();
+    auto time_elapsed = current_time;
+    chrono::duration<double> time_of_procces = current_time - start;
+    cout << "----------------time of loading " << time_of_procces << endl;
+
+
+    
+    pdal::PointViewSet views = normal->execute(table);
+            ////TIME
+    current_time = chrono::high_resolution_clock::now();
+    time_of_procces = current_time - time_elapsed;
+    time_elapsed = current_time;
+    cout << "----------------time of conting normals " << time_of_procces << endl;
 
 
         //printg total points
@@ -109,7 +128,7 @@ int main() {
         std::cout << "Class-6 points: " << v->size() << "\n";
     }
 
-
+    
 
     
 
@@ -167,6 +186,12 @@ int main() {
     cout << "min " << min << endl;
     cout << "max " << max << endl;
     cout << "average " << average << endl;
+    ////TIME
+    current_time = chrono::high_resolution_clock::now();
+    time_of_procces = current_time - time_elapsed;
+    time_elapsed = current_time;
+    auto time_before_group_creating = current_time;
+    cout << "----------------time of wall filtering " << time_of_procces << endl;
 
 
 
@@ -180,7 +205,9 @@ int main() {
     int size_of_group = 0, id = 1;
     while (temporary_buildpoint.size() > 1) {
         ofstream file("roofs/roof" + to_string(id) + ".txt");
+        ofstream filecsv("roofscsv/roof" + to_string(id) + ".csv");
         file << fixed << setprecision(3);
+        filecsv << fixed << setprecision(3);
 
 
 
@@ -203,6 +230,7 @@ int main() {
 
                 group.push_back(temporary_buildpoint[i]);
                 file << temporary_buildpoint[i].x << "," << temporary_buildpoint[i].y << "," << temporary_buildpoint[i].z << std::endl;
+                filecsv << temporary_buildpoint[i].x << "," << temporary_buildpoint[i].y << "," << temporary_buildpoint[i].z << "," << temporary_buildpoint[i].curvature << std::endl;
 
                 temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
                 i--;
@@ -210,7 +238,16 @@ int main() {
             }
         }
         file.close();
-        cout << "size_of_roof " << id << " is " << size_of_group << endl;
+        filecsv.close();
+        cout << "size_of_roof " << id << " is " << size_of_group << " \t\ttime od computing \t\t";
+        ////TIME
+        current_time = chrono::high_resolution_clock::now();
+        time_of_procces = current_time - time_elapsed;
+        time_elapsed = current_time;
+
+        cout << time_of_procces << endl;
+
+
         id++;
 
         
@@ -228,7 +265,11 @@ int main() {
     }
     
 
-
+    ////TIME
+    current_time = chrono::high_resolution_clock::now();
+    time_of_procces = current_time - time_before_group_creating;
+    time_elapsed = current_time;
+    cout << "----------------time of group creating " << time_of_procces << endl;
 
 
 
@@ -242,12 +283,12 @@ int main() {
     cout << "celkovy pocet bodov " << amount << endl;
 
 
-    int group_number = 5;
+    /*int group_number = 5;
     for (int i = 0; i < roofs[group_number].size(); i++) {
 
         cout << "nx   " << roofs[group_number][i].nx << " ny   " << roofs[group_number][i].ny << " nz   " << roofs[group_number][i].nz << endl;
         cout << " " << endl;
-    }
+    }*/
 
 
     std::cout << "Class-6 points after filtering null normals in x direction: " << buildpoint.size() << "\n\n\n";
@@ -275,7 +316,7 @@ int main() {
     //printSchema(table);
     //dumpFirstN(table, *v, 10);
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    std::cout << "\n\nProgram ran in " << elapsed.count() << " seconds.\n";
+    auto end = chrono::high_resolution_clock::now();
+    chrono::duration<double> elapsedd = end - start;
+    cout << "\n\nProgram ran in " << elapsedd.count() << " seconds.\n";
 }
