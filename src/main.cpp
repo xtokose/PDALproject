@@ -196,9 +196,55 @@ int main() {
 
 
 
+        //filtering by z value
+    ofstream filez("buildpoints/building_points_Zfilter.txt");
+    filez << fixed << setprecision(3);
+    double tolerance = 1;
+    vector<BuildingPoint> temporary_buildpoint = buildpoint;
+    size_t erased_points = 0;
+    for (int i = 0; i < temporary_buildpoint.size() - erased_points; i++) {
+
+
+
+
+        for (int j = 0; j < temporary_buildpoint.size(); j++) {
+
+            if ((abs(temporary_buildpoint[i].x - temporary_buildpoint[j].x) < tolerance) &&
+                (abs(temporary_buildpoint[i].y - temporary_buildpoint[j].y) < tolerance) &&
+                (temporary_buildpoint[j].z > temporary_buildpoint[i].z)) {
+
+                temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
+                i--;
+                j = temporary_buildpoint.size();
+                erased_points++;
+            }
+
+        }
+    }
+    buildpoint = temporary_buildpoint;
+
+    cout << "number of points after z filter    " << buildpoint.size() << endl;
+    for (int i = 0; i < buildpoint.size(); i++) {
+        filez << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
+    }
+    filez.close();
+
+    ////TIME
+    current_time = chrono::high_resolution_clock::now();
+    time_of_procces = current_time - time_elapsed;
+    time_elapsed = current_time;
+    time_before_group_creating = current_time;
+    cout << "----------------time of z filtering " << time_of_procces << endl;
+
+
+
+
+
+
+
         //creating groups based on similar normals
     ratio_angle = 5;    // degree ratio
-    vector<BuildingPoint> temporary_buildpoint = buildpoint; //temporary vector from which we will pop out points with same group
+    temporary_buildpoint = buildpoint; //temporary vector from which we will pop out points with same group
     vector<vector<BuildingPoint>> roofs;
     ratio = sin(ratio_angle * PI / 180.0);
     size_t current_temp_size = temporary_buildpoint.size();
