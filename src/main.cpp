@@ -6,6 +6,10 @@
 #include <pdal/Stage.hpp>
 #include <pdal/io/BufferReader.hpp>
 #include <pdal/PointRef.hpp>
+#include <pdal/filters/OutlierFilter.hpp>
+#include <pdal/filters/RangeFilter.hpp>
+
+#include <pdal/PipelineManager.hpp>
 
 #include <cstdlib>
 #include <iomanip>
@@ -197,50 +201,128 @@ int main() {
 
 
         //filtering by z value
-    ofstream filez("buildpoints/building_points_Zfilter.txt");
-    filez << fixed << setprecision(3);
-    double tolerance = 1;
     vector<BuildingPoint> temporary_buildpoint = buildpoint;
-    size_t erased_points = 0;
-    for (int i = 0; i < temporary_buildpoint.size() - erased_points; i++) {
+    //ofstream filez("buildpoints/building_points_Zfilter.txt");
+    //filez << fixed << setprecision(3);
+    //double tolerance = 1;
+    //
+    //size_t erased_points = 0;
+    //for (int i = 0; i < temporary_buildpoint.size() - erased_points; i++) {
 
 
 
 
-        for (int j = 0; j < temporary_buildpoint.size(); j++) {
+    //    for (int j = 0; j < temporary_buildpoint.size(); j++) {
 
-            if ((abs(temporary_buildpoint[i].x - temporary_buildpoint[j].x) < tolerance) &&
-                (abs(temporary_buildpoint[i].y - temporary_buildpoint[j].y) < tolerance) &&
-                (temporary_buildpoint[j].z > temporary_buildpoint[i].z)) {
+    //        if ((abs(temporary_buildpoint[i].x - temporary_buildpoint[j].x) < tolerance) &&
+    //            (abs(temporary_buildpoint[i].y - temporary_buildpoint[j].y) < tolerance) &&
+    //            (temporary_buildpoint[j].z > temporary_buildpoint[i].z)) {
 
-                temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
-                i--;
-                j = temporary_buildpoint.size();
-                erased_points++;
-            }
+    //            temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
+    //            i--;
+    //            j = temporary_buildpoint.size();
+    //            erased_points++;
+    //        }
 
-        }
+    //    }
+    //}
+    //buildpoint = temporary_buildpoint;
+
+    //cout << "number of points after z filter    " << buildpoint.size() << endl;
+    //for (int i = 0; i < buildpoint.size(); i++) {
+    //    filez << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
+    //}
+    //filez.close();
+
+    //////TIME
+    //current_time = chrono::high_resolution_clock::now();
+    //time_of_procces = current_time - time_elapsed;
+    //time_elapsed = current_time;
+    //time_before_group_creating = current_time;
+    //cout << "----------------time of z filtering " << time_of_procces << endl;
+
+
+
+
+
+
+
+
+        //outliers
+    pdal::PointTable table2;
+    pdal::PointLayoutPtr layout = table2.layout();
+    layout->registerDim(pdal::Dimension::Id::X);
+    layout->registerDim(pdal::Dimension::Id::Y);
+    layout->registerDim(pdal::Dimension::Id::Z);
+    layout->registerDim(pdal::Dimension::Id::NormalX);
+    layout->registerDim(pdal::Dimension::Id::NormalY);
+    layout->registerDim(pdal::Dimension::Id::NormalZ);
+    layout->registerDim(pdal::Dimension::Id::Curvature);
+    layout->registerDim(pdal::Dimension::Id::Classification);
+
+    pdal::PointViewPtr view(new pdal::PointView(table2));
+    for (auto& p : buildpoint)
+    {
+        pdal::PointId id = view->size();
+        view->setField(pdal::Dimension::Id::X, id, p.x);
+        view->setField(pdal::Dimension::Id::Y, id, p.y);
+        view->setField(pdal::Dimension::Id::Z, id, p.z);
+        view->setField(pdal::Dimension::Id::NormalX, id, p.nx);
+        view->setField(pdal::Dimension::Id::NormalY, id, p.ny);
+        view->setField(pdal::Dimension::Id::NormalZ, id, p.nz);
+        view->setField(pdal::Dimension::Id::Curvature, id, p.curvature);
+
+
+
+
+        //view->appendPoint(*view, id); // WRONG (you’re copying from itself)
     }
-    buildpoint = temporary_buildpoint;
 
-    cout << "number of points after z filter    " << buildpoint.size() << endl;
-    for (int i = 0; i < buildpoint.size(); i++) {
-        filez << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
+    pdal::BufferReader breader;
+    breader.addView(view);
+    pdal::PipelineManager manager;
+    pdal::Stage& outlier = manager.makeFilter("filters.outlier", breader);
+    pdal::Options opts2;
+    opts2.add("method", "statistical");
+    opts2.add("mean_k", 6);
+    opts2.add("multiplier", 0.5);
+    outlier.setOptions(opts2);
+    pdal::Stage& rangeb = manager.makeFilter("filters.range", outlier);
+    pdal::Options rangeOpts;
+    rangeOpts.add("limits", "Classification![7:7]");
+    rangeb.setOptions(rangeOpts);
+    manager.execute();
+
+    pdal::PointViewSet result = manager.views();
+    pdal::PointViewPtr filtered = *result.begin();
+    std::cout << "Original points: " << view->size() << "\n";
+    std::cout << "Filtered points: " << filtered->size() << "\n";
+
+    ofstream fileo("buildpoints/building_points_outlier.txt");
+    fileo << fixed << setprecision(3);
+
+    buildpoint.clear();
+    for (pdal::PointId i = 0; i < filtered->size(); ++i)
+    {
+        BuildingPoint p;
+        p.x = filtered->getFieldAs<double>(pdal::Dimension::Id::X, i);
+        p.y = filtered->getFieldAs<double>(pdal::Dimension::Id::Y, i);
+        p.z = filtered->getFieldAs<double>(pdal::Dimension::Id::Z, i);
+        p.nx = filtered->getFieldAs<double>(pdal::Dimension::Id::NormalX, i);
+        p.ny = filtered->getFieldAs<double>(pdal::Dimension::Id::NormalY, i);
+        p.nz = filtered->getFieldAs<double>(pdal::Dimension::Id::NormalZ, i);
+        p.curvature = filtered->getFieldAs<double>(pdal::Dimension::Id::Curvature, i);
+        buildpoint.push_back(p);
+        fileo << p.x << "," << p.y << "," << p.z << endl;
     }
-    filez.close();
-
-    ////TIME
-    current_time = chrono::high_resolution_clock::now();
-    time_of_procces = current_time - time_elapsed;
-    time_elapsed = current_time;
-    time_before_group_creating = current_time;
-    cout << "----------------time of z filtering " << time_of_procces << endl;
+    fileo.close();
 
 
 
 
 
 
+    temporary_buildpoint.clear();
 
         //creating groups based on similar normals
     ratio_angle = 5;    // degree ratio
