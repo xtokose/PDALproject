@@ -140,7 +140,7 @@ int main() {
     
 
         //filter points based on angle and curvature (only class-6 points)
-    double raito_curvature = 0.1;                       //curv ratio
+    double raito_curvature = 0.01;                       //curv ratio
     double ratio_angle = 20;                            //degree ratio
 
     vector<BuildingPoint> buildpoint;
@@ -202,44 +202,47 @@ int main() {
 
         //filtering by z value
     vector<BuildingPoint> temporary_buildpoint = buildpoint;
-    //ofstream filez("buildpoints/building_points_Zfilter.txt");
-    //filez << fixed << setprecision(3);
-    //double tolerance = 1;
-    //
-    //size_t erased_points = 0;
-    //for (int i = 0; i < temporary_buildpoint.size() - erased_points; i++) {
+    ofstream filez("buildpoints/building_points_Zfilter.txt");
+    filez << fixed << setprecision(3);
+    double tolerance = 1;
+    
+    size_t erased_points = 0;
+     for (int i = 0; i < temporary_buildpoint.size() - erased_points; i++) {
 
 
 
 
-    //    for (int j = 0; j < temporary_buildpoint.size(); j++) {
+         for (int j = 0; j < temporary_buildpoint.size(); j++) {
 
-    //        if ((abs(temporary_buildpoint[i].x - temporary_buildpoint[j].x) < tolerance) &&
-    //            (abs(temporary_buildpoint[i].y - temporary_buildpoint[j].y) < tolerance) &&
-    //            (temporary_buildpoint[j].z > temporary_buildpoint[i].z)) {
+             if ((abs(temporary_buildpoint[i].x - temporary_buildpoint[j].x) < tolerance) &&
+                 (abs(temporary_buildpoint[i].y - temporary_buildpoint[j].y) < tolerance) &&
+                 (temporary_buildpoint[j].z > temporary_buildpoint[i].z)) {
 
-    //            temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
-    //            i--;
-    //            j = temporary_buildpoint.size();
-    //            erased_points++;
-    //        }
+                 temporary_buildpoint.erase(temporary_buildpoint.begin() + i);
+                 i--;
+                 j = temporary_buildpoint.size();
+                 erased_points++;
+             }
 
-    //    }
-    //}
-    //buildpoint = temporary_buildpoint;
+         }
+     }
+     buildpoint = temporary_buildpoint;
 
-    //cout << "number of points after z filter    " << buildpoint.size() << endl;
-    //for (int i = 0; i < buildpoint.size(); i++) {
-    //    filez << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
-    //}
-    //filez.close();
+
+
+
+    cout << "number of points after z filter    " << buildpoint.size() << endl;
+    for (int i = 0; i < buildpoint.size(); i++) {
+        filez << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
+    }
+    filez.close();
 
     //////TIME
-    //current_time = chrono::high_resolution_clock::now();
-    //time_of_procces = current_time - time_elapsed;
-    //time_elapsed = current_time;
-    //time_before_group_creating = current_time;
-    //cout << "----------------time of z filtering " << time_of_procces << endl;
+    current_time = chrono::high_resolution_clock::now();
+    time_of_procces = current_time - time_elapsed;
+    time_elapsed = current_time;
+    time_before_group_creating = current_time;
+    cout << "----------------time of z filtering " << time_of_procces << endl;
 
 
 
@@ -271,11 +274,6 @@ int main() {
         view->setField(pdal::Dimension::Id::NormalY, id, p.ny);
         view->setField(pdal::Dimension::Id::NormalZ, id, p.nz);
         view->setField(pdal::Dimension::Id::Curvature, id, p.curvature);
-
-
-
-
-        //view->appendPoint(*view, id); // WRONG (you’re copying from itself)
     }
 
     pdal::BufferReader breader;
@@ -322,7 +320,21 @@ int main() {
 
 
 
-    temporary_buildpoint.clear();
+        //smoothing
+
+    ofstream filesm("buildpoints/building_points_smoothed.txt");
+    filesm << fixed << setprecision(3);
+    for (int i = 0; i < buildpoint.size(); i++) {
+        buildpoint[i].x = buildpoint[i].x - buildpoint[i].nx * buildpoint[i].curvature;
+        buildpoint[i].y = buildpoint[i].y - buildpoint[i].ny * buildpoint[i].curvature;
+        buildpoint[i].z = buildpoint[i].z - buildpoint[i].nz * buildpoint[i].curvature;
+        filesm << buildpoint[i].x << "," << buildpoint[i].y << "," << buildpoint[i].z << endl;
+    }
+    filesm.close();
+    
+
+
+
 
         //creating groups based on similar normals
     ratio_angle = 5;    // degree ratio
