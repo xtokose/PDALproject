@@ -44,7 +44,7 @@ private:
     StageFactory factory;
     Stage* reader;
     Stage* range;
-    //Stage* cluster;
+    Stage* cluster;
     Stage* normal;
     PointTable mainTable;
 
@@ -58,7 +58,7 @@ private:
     void makePointFile(string filename) {
     
         ofstream file("buildpoints/" + filename);
-        file << fixed << setprecision(3);
+        file << fixed << setprecision(2);
         PointViewPtr view = *buildpoint.begin();
         for (PointId i = 0; i < view->size(); ++i) {
             double x = view->getFieldAs<double>(Dimension::Id::X, i);
@@ -74,22 +74,48 @@ private:
         BufferReader bufferReader;
         bufferReader.addView(inputView);
 
-        //PointTable table;
+        PointTable table;
 
         // Create the normal filter
         NormalFilter normalFilter;
         Options options;
-        options.add("knn", 8);          // typical K-nearest neighbors
+        options.add("knn", 16);          // typical K-nearest neighbors
         normalFilter.setOptions(options);
         normalFilter.setInput(bufferReader);
-        normalFilter.prepare(mainTable);
-        buildpoint = normalFilter.execute(mainTable);
+        normalFilter.prepare(table);
+        buildpoint = normalFilter.execute(table);
 
 
     }
 
 public:
     PointViewSet buildpoint;
+    void printSchema()
+    {
+        auto layout = mainTable.layout();
+        cout << "Dimensions (" << layout->dims().size() << "):\n";
+        for (auto id : layout->dims())
+            cout << "  - " << Dimension::name(id) << "\n";
+    }
+    void printAllDimensions(size_t N = 10)
+    {
+        PointViewPtr v = *buildpoint.begin();
+        auto layout = mainTable.layout();
+        const PointId n = min<PointId>(N, v->size());
+
+        for (PointId i = 0; i < n; ++i)
+        {
+            cout << "Point " << i << ":\n";
+            for (auto id : layout->dims())
+            {
+                // getFieldAs<double> is convenient for numeric dims (applies scale/offset)
+                double val = v->getFieldAs<double>(id, i);
+                cout << "  " << left << setw(18)
+                    << Dimension::name(id) << " = " << val << "\n";
+            }
+        }
+    }
+
 
     void loadFile() {
         auto start = chrono::high_resolution_clock::now();
@@ -141,35 +167,46 @@ public:
 
             //debug      
         if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nComputing normals finished in " << duration.count()/1000. << " seconds\n";
+            auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+            cout << "\nComputing normals finished in " << duration.count() / 1000. << " miliseconds\n";
 
         }
         
     }
     void clusterPoints() {
         auto start = chrono::high_resolution_clock::now();
-        Stage* cluster = factory.createStage("filters.cluster");
+        cluster = factory.createStage("filters.cluster");
         Options opts;
         opts.add("tolerance", 1.5);
         opts.add("min_points", 20);
         cluster->setOptions(opts);
-
         cluster->setInput(*normal);
-
-        PointTable table;
-        cluster->prepare(mainTable);
-        PointViewSet outSet = cluster->execute(mainTable);
-        buildpoint = outSet;
-
-
+        
+      
         //debug      
         if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nClustering finished in " << duration.count() / 1000. << " seconds\n";
+            auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+            cout << "\nClustering finished in " << duration.count() / 1000. << " miliseconds\n";
+        }
+
+
+
+
+        execute();
+        makePointFile("points_after_filtering_class_6.txt");
+    }
+    void execute() {
+        auto start2 = chrono::high_resolution_clock::now();
+        cluster->prepare(mainTable);
+        buildpoint = cluster->execute(mainTable);
+
+
+
+        if (debug) {
+            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start2);
+            cout << "\Executing point table finished in " << duration.count() / 1000. << " seconds\n";
             cout << "Points remaining: " << get_points_size(buildpoint) << endl;
         }
-        makePointFile("points_after_filtering_class_6.txt");
     }
     void filterWalls() {
         auto start = chrono::high_resolution_clock::now();
@@ -305,10 +342,11 @@ public:
         PointViewPtr view = *buildpoint.begin();
 
 
-        for (int i = 0; i < iterations; i++) {
-            double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
+        for (int j = 0; j < iterations; j++) {
+            //double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
 
-            for (int j = 0; j < view->size(); j++) {
+            for (int i = 0; i < view->size(); i++) {
+                double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
                 double x = view->getFieldAs<double>(Dimension::Id::X, i);
                 double y = view->getFieldAs<double>(Dimension::Id::Y, i);
                 double z = view->getFieldAs<double>(Dimension::Id::Z, i);
@@ -318,7 +356,12 @@ public:
 
                 x = x - nx * delta * curv;
                 y = y - ny * delta * curv;
-                z = z - nz * delta * curv;     
+                z = z - nz * delta * curv;
+
+                view->setField(Dimension::Id::X, i , x);
+                view->setField(Dimension::Id::Y, i, y);
+                view->setField(Dimension::Id::Z, i, z);
+
             }
             recomputeNormals();
         }
@@ -333,7 +376,7 @@ public:
         }
         makePointFile("points_after_smoothing.txt");
     }
-    void makeClusteredFiles() {
+    void makeClusteredFiles(string folder) {
         PointViewPtr view = *buildpoint.begin();
         unordered_set<int> clusterIDs;
 
@@ -354,8 +397,8 @@ public:
         vector<ofstream> files;
         files.reserve(maxVal);
         for (int i = 0; i < maxVal; i++) {
-            files.emplace_back("roofs/roof" + to_string(i + 1) + ".txt");
-            files[i] << fixed << setprecision(3);
+            files.emplace_back(folder + "/roof" + to_string(i + 1) + ".txt");
+            files[i] << fixed << setprecision(2);
 
         }
 
@@ -384,62 +427,27 @@ public:
 
 
 
-void printSchema(const pdal::PointTable& table)
-{
-    auto layout = table.layout();
-    std::cout << "Dimensions (" << layout->dims().size() << "):\n";
-    for (auto id : layout->dims())
-        std::cout << "  - " << pdal::Dimension::name(id) << "\n";
-}
-
-// --- dump first N points (all dimensions) ---
-void dumpFirstN(const pdal::PointTable& table,
-    const pdal::PointView& v, std::size_t N = 10)
-{
-    auto layout = table.layout();
-    const pdal::PointId n = std::min<pdal::PointId>(N, v.size());
-
-    for (pdal::PointId i = 0; i < n; ++i)
-    {
-        std::cout << "Point " << i << ":\n";
-        for (auto id : layout->dims())
-        {
-            // getFieldAs<double> is convenient for numeric dims (applies scale/offset)
-            double val = v.getFieldAs<double>(id, i);
-            std::cout << "  " << std::left << std::setw(18)
-                << pdal::Dimension::name(id) << " = " << val << "\n";
-        }
-    }
-}
-
 
 int main() {
     _putenv_s("PROJ_LIB", "C:\\vcpkg\\installed\\x64-windows\\share\\proj");
     _putenv_s("PROJ_DATA", "C:\\vcpkg\\installed\\x64-windows\\share\\proj");
     _putenv_s("GDAL_DATA", "C:\\vcpkg\\installed\\x64-windows\\share\\gdal");  
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = chrono::high_resolution_clock::now();
 
     PointReader p;
     p.loadFile();
     p.filterClass6();
-    
-
     p.computeNormals();
     p.clusterPoints();
     p.filterWalls();
     //p.filerByZValue();
     p.filterOutliers();
-    //p.smoothPoints(10);   
-    p.makeClusteredFiles();
+    //p.makeClusteredFiles("roofs");
+    //p.smoothPoints(40);
+    //p.makeClusteredFiles("roofs_afterSmoothing");
+    
 
 
-
-
-    //auto v = *views.begin();                 // first view
-    //printSchema(table);
-    //dumpFirstN(table, *v, 10);
-
-    auto end = chrono::high_resolution_clock::now();
-    chrono::duration<double> elapsedd = end - start;
+    chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
     cout << "\n\nProgram ran in " << elapsedd.count() << " seconds.\n";
 }
