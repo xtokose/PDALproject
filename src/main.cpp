@@ -36,7 +36,7 @@ class PointReader {
 private:
     bool debug = true;
     double ratio_curvature = 0.01;                       //curv ratio for filtering points
-    double ratio_angle = 1;                            //degree ratio for filtering walls
+    double ratio_angle = 15;                            //degree ratio for filtering walls
     double ratio_Zvalue = 0;
 
 
@@ -210,6 +210,37 @@ public:
         }
         return cluster;
     }
+    Stage* zsmooth(Stage* input) {
+        
+
+
+        Options zsmoothOptions;
+        //zsmoothOptions.add("radius", 1.0);
+        //zsmoothOptions.add("samples", 5);
+        //zsmoothOptions.add("thresh", 0.5);
+
+        zsmoothOptions.add("radius", 0.5);
+        zsmoothOptions.add("dim", "Zsmooth");
+
+
+       // zsmoothOptions.add("thresh", 0.5);
+
+        Stage* zsmooth = factory.createStage("filters.zsmooth");
+        zsmooth->setInput(*input);
+        zsmooth->setOptions(zsmoothOptions);
+
+
+
+        Options opts;
+        opts.add("value", "Z = Zsmooth");
+
+        Stage* assign = factory.createStage("filters.assign");
+        assign->setInput(*zsmooth);
+        assign->setOptions(opts);
+
+        return assign;
+    }
+
     void execute(Stage* input) {
         auto start2 = chrono::high_resolution_clock::now();
         input->prepare(mainTable);
@@ -501,41 +532,71 @@ public:
 
 
     }
-    void makeClusteredFiles(string folder) {
+    void makeClusteredFiles(bool smoothed, string folder) {
         PointViewPtr view = *buildpoint.begin();
 
+            //removing existing
+        filesystem::path path = folder;
+        for (const auto& entry : filesystem::directory_iterator(path)) {
+            if (!filesystem::is_regular_file(entry.status()))
+                continue; // skip subdirs etc.
+
+            if (entry.path().extension() == ".txt") {
+                filesystem::remove(entry.path());
+            }
+        }
 
 
 
         unordered_set<int> clusterIDs = getRoofsIDs(view);
         size_t numClusters = clusterIDs.size();
-        auto it = max_element(clusterIDs.begin(), clusterIDs.end());
-        size_t maxVal = *it;
+        cout << "numClusters   " << numClusters << endl;
 
+
+
+        //auto it = max_element(clusterIDs.begin(), clusterIDs.end());
+        //size_t maxVal = *it;
+        //cout << "maxVal " << maxVal << endl;
+        //size_t numClusters = 30;
+        //size_t maxVal = 30;
 
 
         vector<ofstream> files;
-        files.reserve(maxVal);
-        for (int i = 0; i < maxVal; i++) {
+        files.reserve(numClusters);
+
+        
+
+        cout << "done 2 " << endl;
+
+        for (int i = 0; i < numClusters; i++) {
             files.emplace_back(folder + "/roof" + to_string(i + 1) + ".txt");
             files[i] << fixed << setprecision(3);
 
         }
 
-      
+
+        int szz = files.size();
+
+        cout << "done 3 " << endl;
         for (PointId i = 0; i < view->size(); ++i) {
             int id = view->getFieldAs<int>(Dimension::Id::ClusterID, i);
             double x = view->getFieldAs<double>(Dimension::Id::X, i);
             double y = view->getFieldAs<double>(Dimension::Id::Y, i);
             double z = view->getFieldAs<double>(Dimension::Id::Z, i);
+            
             if (id > 0) {
-             
+                //cout << "id -------- " << id << endl;
+                //cout << "szz " << szz << endl;
                 files[id - 1] << x << "," << y << "," << z << endl;
             }
 
         }
 
+        cout << "done 4 " << endl;
+
+
         for (int i = 0; i < numClusters; i++) {
+            //cout << "done 5 - ----  " << i << endl;
             files[i].close();
         }
 
@@ -751,17 +812,25 @@ int main() {
     stage = p.loadFile("LiDAR.laz");
     stage = p.filterClass6(stage);
     stage = p.computeNormals(stage, 16);
+   
     stage = p.clusterPoints(stage, 1.5,20);
+    stage = p.zsmooth(stage);
     p.execute(stage);
 
 
     p.filterWalls();
     //p.filerByZValue();
     p.filterOutliers("statistical", 6, 0.5, 1, 4);
-    p.makeClusteredFiles("roofs");
-    //p.smoothAllPoints(300,0.005);
-    //p.makeClusteredFiles("roofs_afterSmoothing");
-    p.makePointViewSetRoofs();
+
+
+    //p.makeClusteredFiles(false, "roofs");
+    
+    p.makeClusteredFiles(true , "roofs_afterSmoothing");
+
+
+
+
+    //p.makePointViewSetRoofs();
     //p.clusterRoofs(1.5, 20);
 
     chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
