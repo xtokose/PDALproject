@@ -65,7 +65,11 @@ private:
         }
         file.close();
     };
+       
     void recomputeNormals() {
+        ////not using anywhere currently
+        ////not using anywhere currently
+
         PointViewPtr inputView = *buildpoint.begin();
 
         BufferReader bufferReader;
@@ -213,6 +217,7 @@ public:
         Options zsmoothOptions;
         zsmoothOptions.add("radius", radius);
         zsmoothOptions.add("dim", "Zsmooth");
+        //zsmoothOptions.add("medianpercent", 0);
 
         Stage* zsmooth = factory.createStage("filters.zsmooth");
         zsmooth->setInput(*input);
@@ -382,146 +387,9 @@ public:
 
         }
         makePointFile("points_after_outliers_filter.txt");
-    }
-    void smoothAllPoints(int iterations, double delta) {
-        auto start = chrono::high_resolution_clock::now();
-        PointViewPtr view = *buildpoint.begin();
-
-        vector<double> old_curv;
-        for (int i = 0; i < view->size(); i++) {
-            old_curv.push_back(1);
-        }
-
-
-
-
-        for (int j = 0; j < iterations; j++) {
-            //double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
-
-            
-            
-
-            cout << "iteration " << j << endl;
-            for (int i = 0; i < view->size(); i++) {
-
-                
-                int cid = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
-                if (cid == 7) {
-
-
-                    double z;
-                    double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
-                    if (curv < old_curv[i]) {
-                        double x = view->getFieldAs<double>(Dimension::Id::X, i);
-                        double y = view->getFieldAs<double>(Dimension::Id::Y, i);
-                        z = view->getFieldAs<double>(Dimension::Id::Z, i);
-                        double nx = view->getFieldAs<double>(Dimension::Id::NormalX, i);
-                        double ny = view->getFieldAs<double>(Dimension::Id::NormalY, i);
-                        double nz = view->getFieldAs<double>(Dimension::Id::NormalZ, i);
-
-
-
-
-                        x = x - nx * delta * curv;
-                        y = y - ny * delta * curv;
-                        z = z - nz * delta * curv;
-
-
-                        view->setField(Dimension::Id::X, i, x);
-                        view->setField(Dimension::Id::Y, i, y);
-                        view->setField(Dimension::Id::Z, i, z);
-                        
-                    }
-
-                    if ((i > 84000) && (i < 84020)) {
-                        cout << "i " << i << "   z " << z << "     curv " << curv << "  oldcurve " << old_curv[i] << endl;
-                    }
-
-                    old_curv[i] = curv;
-
-                }
-
-               
-
-            }
-            recomputeNormals();
-        }
-
-        
-
-
-            //debug
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nSmoothing points finished in " << duration.count() / 1000. << " seconds\n";
-        }
-        makePointFile("points_after_smoothing.txt");
-    }
-    void smoothRoofPoints(int iterations, double delta) {
-        auto start = chrono::high_resolution_clock::now();
-        PointViewPtr view = *buildpoint.begin();
-
-        vector<int> id_number;
-        vector<double> old_curv;
-        for (int i = 0; i < view->size(); i++) {
-            old_curv.push_back(1);
-            int cid = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
-            if (cid == 7) {
-                int ide = view->getFieldAs<double>(Dimension::Id::PointId, i);
-                id_number.push_back(ide);
-            }
-        }
-
-
-        cout << "id_number.size() " << id_number.size() << endl;
-
-        for (int j = 0; j < iterations; j++) {
-            //double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
-
-
-            cout << "iteration " << j << endl;
-            for (int i = 0; i < id_number.size(); i++) {
-
-                double z;
-                double curv = view->getFieldAs<double>(Dimension::Id::Curvature, id_number[i]);
-                if (curv < old_curv[i]) {
-                    double x = view->getFieldAs<double>(Dimension::Id::X, id_number[i]);
-                    double y = view->getFieldAs<double>(Dimension::Id::Y, id_number[i]);
-                    z = view->getFieldAs<double>(Dimension::Id::Z, id_number[i]);
-                    double nx = view->getFieldAs<double>(Dimension::Id::NormalX, id_number[i]);
-                    double ny = view->getFieldAs<double>(Dimension::Id::NormalY, id_number[i]);
-                    double nz = view->getFieldAs<double>(Dimension::Id::NormalZ, id_number[i]);
-
-                    x = x - nx * delta * curv;
-                    y = y - ny * delta * curv;
-                    z = z - nz * delta * curv;
-
-
-                    view->setField(Dimension::Id::X, id_number[i], x);
-                    view->setField(Dimension::Id::Y, id_number[i], y);
-                    view->setField(Dimension::Id::Z, id_number[i], z);
-
-                }
-
-                if ((i > 0) && (i < 10)) {
-                    cout << "i " << i << "   z " << z << "     curv " << curv << "  oldcurve " << old_curv[i] << endl;
-                }
-
-                old_curv[i] = curv;
-
-
-
-            }
-            recomputeNormals();
-        }
-
-
-
-
-    }
+    }   
     void makeClusteredFiles(bool smoothed, string folder) {
         PointViewPtr view = *buildpoint.begin();
-        cout << "done 0 " << endl;
 
             //removing existing
         filesystem::path path = folder;
@@ -533,12 +401,9 @@ public:
                 filesystem::remove(entry.path());
             }
         }
-        cout << "done 1 " << endl;
 
         unordered_set<int> clusterIDs = getRoofsIDs(view);
         size_t numClusters = clusterIDs.size();
-        cout << "numClusters   " << numClusters << endl;
-
 
 
         //auto it = max_element(clusterIDs.begin(), clusterIDs.end());
@@ -551,20 +416,12 @@ public:
         vector<ofstream> files;
         files.reserve(numClusters);
 
-        
-
-        cout << "done 2 " << endl;
-
         for (int i = 0; i < numClusters; i++) {
             files.emplace_back(folder + "/roof" + to_string(i + 1) + ".txt");
             files[i] << fixed << setprecision(3);
-
         }
 
 
-        int szz = files.size();
-
-        cout << "done 3 " << endl;
         for (PointId i = 0; i < view->size(); ++i) {
             int id = view->getFieldAs<int>(Dimension::Id::ClusterID, i);
             double x = view->getFieldAs<double>(Dimension::Id::X, i);
@@ -572,18 +429,11 @@ public:
             double z = view->getFieldAs<double>(Dimension::Id::Z, i);
             
             if (id > 0) {
-                //cout << "id -------- " << id << endl;
-                //cout << "szz " << szz << endl;
                 files[id - 1] << x << "," << y << "," << z << endl;
             }
-
         }
 
-        cout << "done 4 " << endl;
-
-
         for (int i = 0; i < numClusters; i++) {
-            //cout << "done 5 - ----  " << i << endl;
             files[i].close();
         }
 
@@ -799,7 +649,6 @@ int main() {
     stage = p.loadFile("LiDAR.laz");
     stage = p.filterClass6(stage);
     stage = p.computeNormals(stage, 16);
-   
     stage = p.clusterPoints(stage, 1.5,20);
     stage = p.zsmooth(stage,1);
     p.execute(stage);
@@ -811,7 +660,6 @@ int main() {
 
 
     //p.makeClusteredFiles(false, "roofs");
-    
     p.makeClusteredFiles(true , "roofs_afterSmoothing");
 
 
