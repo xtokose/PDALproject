@@ -35,8 +35,6 @@ using namespace pdal;
 class PointReader {
 private:
     bool debug = true;
-    double ratio_curvature = 0.01;                       //curv ratio for filtering points
-    double ratio_angle = 15;                            //degree ratio for filtering walls
     double ratio_Zvalue = 0;
 
 
@@ -210,30 +208,19 @@ public:
         }
         return cluster;
     }
-    Stage* zsmooth(Stage* input) {
+    Stage* zsmooth(Stage* input, size_t radius) {
         
-
-
         Options zsmoothOptions;
-        //zsmoothOptions.add("radius", 1.0);
-        //zsmoothOptions.add("samples", 5);
-        //zsmoothOptions.add("thresh", 0.5);
-
-        zsmoothOptions.add("radius", 0.5);
+        zsmoothOptions.add("radius", radius);
         zsmoothOptions.add("dim", "Zsmooth");
-
-
-       // zsmoothOptions.add("thresh", 0.5);
 
         Stage* zsmooth = factory.createStage("filters.zsmooth");
         zsmooth->setInput(*input);
         zsmooth->setOptions(zsmoothOptions);
 
 
-
         Options opts;
         opts.add("value", "Z = Zsmooth");
-
         Stage* assign = factory.createStage("filters.assign");
         assign->setInput(*zsmooth);
         assign->setOptions(opts);
@@ -255,7 +242,7 @@ public:
         }
         makePointFile("points_after_filtering_class_6.txt");
     }
-    void filterWalls() {
+    void filterWalls(double ratio_curvature, double ratio_angle) {
         auto start = chrono::high_resolution_clock::now();
         PointViewSet temporaryset;
         PointViewPtr view = *buildpoint.begin();
@@ -534,6 +521,7 @@ public:
     }
     void makeClusteredFiles(bool smoothed, string folder) {
         PointViewPtr view = *buildpoint.begin();
+        cout << "done 0 " << endl;
 
             //removing existing
         filesystem::path path = folder;
@@ -545,8 +533,7 @@ public:
                 filesystem::remove(entry.path());
             }
         }
-
-
+        cout << "done 1 " << endl;
 
         unordered_set<int> clusterIDs = getRoofsIDs(view);
         size_t numClusters = clusterIDs.size();
@@ -814,11 +801,11 @@ int main() {
     stage = p.computeNormals(stage, 16);
    
     stage = p.clusterPoints(stage, 1.5,20);
-    stage = p.zsmooth(stage);
+    stage = p.zsmooth(stage,1);
     p.execute(stage);
 
 
-    p.filterWalls();
+    p.filterWalls(0.01, 15);
     //p.filerByZValue();
     p.filterOutliers("statistical", 6, 0.5, 1, 4);
 
