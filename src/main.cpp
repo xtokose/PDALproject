@@ -14,6 +14,16 @@
 #include <pdal/PipelineManager.hpp>
 
 
+#include <pdal/PointView.hpp>
+//#include <pdal/PointViewId.hpp>
+#include <pdal/DimUtil.hpp>
+
+#include <Eigen/Dense>
+#include <stdexcept>
+#include <cstddef>
+
+
+
 
 #include <cstdlib>
 #include <iomanip>
@@ -32,14 +42,23 @@ const double PI = 3.14159265359;
 using namespace std;
 using namespace pdal;
 
+struct BestFitPlane
+{
+    
+    Eigen::Vector3d normal;   // unit-length (A,B,C)
+    double d;                 // D in Ax + By + Cz + D = 0
+    Eigen::Vector3d centroid; // point on plane
+};
+
+
+
+
+
 class PointReader {
 private:
     bool debug = true;
     double ratio_Zvalue = 0;
 
-
-
-    
 
 
     StageFactory factory;
@@ -106,6 +125,8 @@ private:
 public:
     PointViewSet buildpoint;
     PointViewSet roofs;
+    vector<BestFitPlane> planes;
+
     void printSchema()
     {
         auto layout = mainTable.layout();
@@ -232,6 +253,8 @@ public:
 
         return assign;
     }
+
+
 
     void execute(Stage* input) {
         auto start2 = chrono::high_resolution_clock::now();
@@ -455,17 +478,20 @@ public:
         layout->registerDim(Dimension::Id::Curvature);
 
 
-
-
         unordered_set<int> clusterIDs = getRoofsIDs(old_view);
         for (int i = 0; i < clusterIDs.size(); i++) {
 
 
+
+
+            int count = 0;
             PointViewPtr view(new PointView(rooftable));
             for (int j = 0; j < old_view->size(); j++) {
 
                 size_t clusterID = old_view->getFieldAs<double>(Dimension::Id::ClusterID, j);
                 if (clusterID == (i + 1)) {
+
+                    
                     double x = old_view->getFieldAs<double>(Dimension::Id::X, j);
                     double y = old_view->getFieldAs<double>(Dimension::Id::Y, j);
                     double z = old_view->getFieldAs<double>(Dimension::Id::Z, j);
@@ -475,18 +501,18 @@ public:
                     double curv = old_view->getFieldAs<double>(Dimension::Id::Curvature, j);
 
 
-                    view->setField(Dimension::Id::X, j, x);
-                    view->setField(Dimension::Id::Y, j, y);
-                    view->setField(Dimension::Id::Z, j, z);
-                    view->setField(Dimension::Id::NormalX, j, nx);
-                    view->setField(Dimension::Id::NormalY, j, ny);
-                    view->setField(Dimension::Id::NormalZ, j, nz);
-                    view->setField(Dimension::Id::Curvature, j, curv);
+                    view->setField(Dimension::Id::X, count, x);
+                    view->setField(Dimension::Id::Y, count, y);
+                    view->setField(Dimension::Id::Z, count, z);
+                    view->setField(Dimension::Id::NormalX, count, nx);
+                    view->setField(Dimension::Id::NormalY, count, ny);
+                    view->setField(Dimension::Id::NormalZ, count, nz);
+                    view->setField(Dimension::Id::Curvature, count, curv);
+                    count++;
                 }
+
             }
             roofs.insert(view);
-
-
         }
 
 
@@ -624,15 +650,110 @@ public:
 
 
 
-        for (PointViewPtr view:roofs) {
 
-
-
-
-
-        }
 
     }
+
+    BestFitPlane countPlane(vector<Eigen::Vector3d> points) {
+		BestFitPlane plane;
+
+
+            //centroid
+        double sumx = 0;
+        double sumy = 0; 
+        double sumz = 0;;
+        for (int i = 0; i < points.size(); i++) {
+            sumx += points[i].x();
+            sumy += points[i].y();
+            sumz += points[i].z();
+        }
+
+
+		plane.centroid = Eigen::Vector3d(sumx / points.size(), sumy / points.size(), sumz / points.size());
+
+		    //centered points
+		vector<Eigen::Vector3d> centeredPoints;
+        for (int i = 0; i < points.size(); i++) {
+			centeredPoints.push_back(points[i] - plane.centroid);
+        }
+
+
+
+		    //covariance matrix
+        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
+        const int N = static_cast<int>(centeredPoints.size());
+        for (const auto& p : centeredPoints) {
+            cov.noalias() += p * p.transpose(); // outer product
+        }
+
+
+            //normal
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
+        Eigen::Vector3d normal = solver.eigenvectors().col(0);
+		
+        plane.normal = normal.normalized();
+
+       
+
+            //d
+		plane.d = -plane.normal.dot(plane.centroid);
+
+
+
+
+        
+
+
+
+		return plane;
+    }
+
+    void computatePlanes() {
+
+
+        Eigen::Vector3d b1(0, 0, 1);
+        Eigen::Vector3d b2(2, 0, 2);
+        Eigen::Vector3d b3(1, 3, 0);
+        Eigen::Vector3d b4(1, 0, 1.5);
+        Eigen::Vector3d b5(1, 3, 1);
+		vector<Eigen::Vector3d> testPoints = { b1, b2, b3, b4, b5 };
+        BestFitPlane plane = countPlane(testPoints);
+
+        cout << "x " << plane.normal.x() << endl;
+        cout << "y " << plane.normal.y() << endl;
+        cout << "z " << plane.normal.z() << endl;
+        cout << "d " << plane.d << endl;
+
+        /*int cc = 1;
+        for (PointViewPtr view : roofs) {
+
+			vector<Eigen::Vector3d> points;
+            for (PointId i = 0; i < view->size(); ++i) {
+                double x = view->getFieldAs<double>(Dimension::Id::X, i);
+                double y = view->getFieldAs<double>(Dimension::Id::Y, i);
+                double z = view->getFieldAs<double>(Dimension::Id::Z, i);
+				Eigen::Vector3d point(x, y, z);
+				points.push_back(point);
+            }
+            BestFitPlane plane = countPlane(points);
+			planes.push_back(plane);
+
+            cout << "\n\nPLANE " << cc << endl;
+            cout << "x " << plane.normal.x() << endl;
+            cout << "y " << plane.normal.y() << endl;
+            cout << "z " << plane.normal.z() << endl;
+            cout << "d " << plane.d << endl;
+            cc++;
+
+        }*/
+
+
+    }
+
+
+
+
+
 };
 
 
@@ -645,27 +766,50 @@ int main() {
     auto start = chrono::high_resolution_clock::now();
 
     PointReader p;
-    Stage* stage;
-    stage = p.loadFile("LiDAR.laz");
-    stage = p.filterClass6(stage);
-    stage = p.computeNormals(stage, 16);
-    stage = p.clusterPoints(stage, 1.5,20);
-    stage = p.zsmooth(stage,1);
-    p.execute(stage);
+    //Stage* stage;
+    //stage = p.loadFile("LiDAR.laz");
+    //stage = p.filterClass6(stage);
+    //stage = p.computeNormals(stage, 16);
+    //stage = p.clusterPoints(stage, 1.5,20);
+    //stage = p.zsmooth(stage,1);
+    //p.execute(stage);
+
+    //
+
+    //p.filterWalls(0.01, 15);
+    ////p.filerByZValue();
+    //p.filterOutliers("statistical", 6, 0.5, 1, 4);
 
 
-    p.filterWalls(0.01, 15);
-    //p.filerByZValue();
-    p.filterOutliers("statistical", 6, 0.5, 1, 4);
+    ////p.makeClusteredFiles(false, "roofs");
+    //p.makeClusteredFiles(true , "roofs_afterSmoothing");
 
-
-    //p.makeClusteredFiles(false, "roofs");
-    p.makeClusteredFiles(true , "roofs_afterSmoothing");
-
-
+    //
 
 
     //p.makePointViewSetRoofs();
+
+
+     p.computatePlanes();
+
+
+
+
+    //Eigen::Matrix3d C;
+    //C << 2.0, 0.0, 1.0,
+    //    0.0, 6.0, -3.0,
+    //    1.0, -3.0, 2.0;
+    //std::cout << C << endl;
+
+    //Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(C);
+
+
+    // //Eigen returns them in ascending order for SelfAdjointEigenSolver
+    // std::cout << "Eigenvalues:\n" << solver.eigenvalues() << "\n";
+    // std::cout << "Eigenvectors:\n" << solver.eigenvectors() << "\n";
+
+
+
     //p.clusterRoofs(1.5, 20);
 
     chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
