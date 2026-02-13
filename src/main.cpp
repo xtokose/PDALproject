@@ -50,7 +50,10 @@ struct BestFitPlane
     Eigen::Vector3d centroid; // point on plane
 };
 
-
+struct RoofData {
+    pdal::PointTable table;
+    pdal::PointViewSet view; // contains the PointViewPtrs made from `table`
+};
 
 
 
@@ -63,8 +66,10 @@ private:
 
     StageFactory factory;
     PointTable mainTable;
-    PointTable rooftable;
 
+    
+    //vector<PointTable> rooftable;
+    size_t numClusters;
 
     size_t get_points_size(PointViewSet& set) {
         size_t size = 0;
@@ -107,12 +112,14 @@ private:
 
 
     }
-    unordered_set<int> getRoofsIDs(PointViewPtr view){
+    unordered_set<double> getRoofsIDs(PointViewPtr view){
 
-        unordered_set<int> set;
+
+        unordered_set<double> set;
         for (PointId i = 0; i < view->size(); ++i)
         {
-            int id = view->getFieldAs<int>(Dimension::Id::ClusterID, i);
+            double id = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
+
 
             if (id >= 0)               // ignore noise
                 set.insert(id);
@@ -124,12 +131,15 @@ private:
 
 public:
     PointViewSet buildpoint;
-    PointViewSet roofs;
+    //vector<PointViewSet> roofs;
+   // std::deque<pdal::PointTable> rooftable;
     vector<BestFitPlane> planes;
+    std::vector<std::unique_ptr<RoofData>> roofs;
 
-    void printSchema()
+
+    void printSchema(PointTable table)
     {
-        auto layout = mainTable.layout();
+        auto layout = table.layout();
         cout << "Dimensions (" << layout->dims().size() << "):\n";
         for (auto id : layout->dims())
             cout << "  - " << Dimension::name(id) << "\n";
@@ -158,12 +168,12 @@ public:
         auto start = chrono::high_resolution_clock::now();
 
         Stage* reader = factory.createStage("readers.las");
-        PointTable table;
         Options opts;                                        ////options
         opts.add("filename", filepath);
         reader->setOptions(opts);
 
 
+        PointTable table;
         reader->prepare(table);
         PointViewSet all_points = reader->execute(table);
 
@@ -225,6 +235,9 @@ public:
         cluster->setOptions(opts);
         cluster->setInput(*input);
         
+
+
+
       
         //debug      
         if (debug) {
@@ -258,6 +271,8 @@ public:
 
     void execute(Stage* input) {
         auto start2 = chrono::high_resolution_clock::now();
+
+
         input->prepare(mainTable);
         buildpoint = input->execute(mainTable);
 
@@ -373,9 +388,10 @@ public:
 
         BufferReader breader;
         breader.addView(view);
+
+
+
         PipelineManager manager;
-
-
 
         Stage& outlier = manager.makeFilter("filters.outlier", breader);
         Options opts;
@@ -411,11 +427,19 @@ public:
         }
         makePointFile("points_after_outliers_filter.txt");
     }   
-    void makeClusteredFiles(bool smoothed, string folder) {
-        PointViewPtr view = *buildpoint.begin();
+    void makeClusteredFiles(const PointViewPtr& view , string folder) {
+        
+        /*int cc = 1;
+        cout << "cluster " << cc << endl;
+        cc++;*/
+
+    
+
+        filesystem::create_directories(folder);
 
             //removing existing
         filesystem::path path = folder;
+
         for (const auto& entry : filesystem::directory_iterator(path)) {
             if (!filesystem::is_regular_file(entry.status()))
                 continue; // skip subdirs etc.
@@ -425,15 +449,14 @@ public:
             }
         }
 
-        unordered_set<int> clusterIDs = getRoofsIDs(view);
-        size_t numClusters = clusterIDs.size();
+        
 
+        unordered_set<double> clusterIDs = getRoofsIDs(view);
 
-        //auto it = max_element(clusterIDs.begin(), clusterIDs.end());
-        //size_t maxVal = *it;
-        //cout << "maxVal " << maxVal << endl;
-        //size_t numClusters = 30;
-        //size_t maxVal = 30;
+        numClusters = clusterIDs.size();
+        cout << "numClusters " << numClusters << endl;
+
+        
 
 
         vector<ofstream> files;
@@ -443,19 +466,21 @@ public:
             files.emplace_back(folder + "/roof" + to_string(i + 1) + ".txt");
             files[i] << fixed << setprecision(3);
         }
-
-
+        
+        cout << "sum DONE " << endl;
         for (PointId i = 0; i < view->size(); ++i) {
-            int id = view->getFieldAs<int>(Dimension::Id::ClusterID, i);
+            double id = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
             double x = view->getFieldAs<double>(Dimension::Id::X, i);
             double y = view->getFieldAs<double>(Dimension::Id::Y, i);
             double z = view->getFieldAs<double>(Dimension::Id::Z, i);
             
-            if (id > 0) {
+
+
+            if ((id > 0) && (id < 10000)) {
                 files[id - 1] << x << "," << y << "," << z << endl;
             }
         }
-
+        cout << "DONE " << endl;
         for (int i = 0; i < numClusters; i++) {
             files[i].close();
         }
@@ -467,31 +492,38 @@ public:
     void makePointViewSetRoofs() {
         PointViewPtr old_view = *buildpoint.begin();
 
-        
-        PointLayoutPtr layout = rooftable.layout();
-        layout->registerDim(Dimension::Id::X);
-        layout->registerDim(Dimension::Id::Y);
-        layout->registerDim(Dimension::Id::Z);
-        layout->registerDim(Dimension::Id::NormalX);
-        layout->registerDim(Dimension::Id::NormalY);
-        layout->registerDim(Dimension::Id::NormalZ);
-        layout->registerDim(Dimension::Id::Curvature);
+		int sum = 0;
+
+        for (int k = 0; k < numClusters; k++) {
+            //rooftable.emplace_back();
+            //PointTable& t = rooftable.back();
+
+           // RoofData rd;
+
+            auto rd = std::make_unique<RoofData>();
+
+            //PointTable table;
+            PointLayoutPtr layout = rd->table.layout();
 
 
-        unordered_set<int> clusterIDs = getRoofsIDs(old_view);
-        for (int i = 0; i < clusterIDs.size(); i++) {
+            layout->registerDim(Dimension::Id::X);
+            layout->registerDim(Dimension::Id::Y);
+            layout->registerDim(Dimension::Id::Z);
+            layout->registerDim(Dimension::Id::NormalX);
+            layout->registerDim(Dimension::Id::NormalY);
+            layout->registerDim(Dimension::Id::NormalZ);
+            layout->registerDim(Dimension::Id::Curvature);
 
-
-
+            layout->registerDim(Dimension::Id::ClusterID);
 
             int count = 0;
-            PointViewPtr view(new PointView(rooftable));
+            PointViewPtr view(new PointView(rd->table));
             for (int j = 0; j < old_view->size(); j++) {
 
                 size_t clusterID = old_view->getFieldAs<double>(Dimension::Id::ClusterID, j);
-                if (clusterID == (i + 1)) {
+                if (clusterID == (k + 1)) {
 
-                    
+
                     double x = old_view->getFieldAs<double>(Dimension::Id::X, j);
                     double y = old_view->getFieldAs<double>(Dimension::Id::Y, j);
                     double z = old_view->getFieldAs<double>(Dimension::Id::Z, j);
@@ -508,137 +540,170 @@ public:
                     view->setField(Dimension::Id::NormalY, count, ny);
                     view->setField(Dimension::Id::NormalZ, count, nz);
                     view->setField(Dimension::Id::Curvature, count, curv);
+                    view->setField(Dimension::Id::ClusterID, count, 0);
+
                     count++;
                 }
 
             }
-            roofs.insert(view);
+            cout << "view->size() " << view->size() << endl;
+			sum += view->size();
+            PointViewSet temp;
+            temp.insert(view);
+
+            rd->view.insert(view);
+            roofs.push_back(std::move(rd));
+
+
+
+            /////////////
+            
+    //        unordered_set<int> clusterIDs = getRoofsIDs(old_view);
+    //        cout << "clusterIDs.size() " << clusterIDs.size() << endl;
+    //        for (int i = 0; i < clusterIDs.size(); i++) {
+
+    //            int count = 0;
+    //            PointViewPtr view(new PointView(rooftable[k]));
+    //            for (int j = 0; j < old_view->size(); j++) {
+
+    //                size_t clusterID = old_view->getFieldAs<double>(Dimension::Id::ClusterID, j);
+    //                if (clusterID == (i + 1)) {
+
+
+    //                    double x = old_view->getFieldAs<double>(Dimension::Id::X, j);
+    //                    double y = old_view->getFieldAs<double>(Dimension::Id::Y, j);
+    //                    double z = old_view->getFieldAs<double>(Dimension::Id::Z, j);
+    //                    double nx = old_view->getFieldAs<double>(Dimension::Id::NormalX, j);
+    //                    double ny = old_view->getFieldAs<double>(Dimension::Id::NormalY, j);
+    //                    double nz = old_view->getFieldAs<double>(Dimension::Id::NormalZ, j);
+    //                    double curv = old_view->getFieldAs<double>(Dimension::Id::Curvature, j);
+
+
+    //                    view->setField(Dimension::Id::X, count, x);
+    //                    view->setField(Dimension::Id::Y, count, y);
+    //                    view->setField(Dimension::Id::Z, count, z);
+    //                    view->setField(Dimension::Id::NormalX, count, nx);
+    //                    view->setField(Dimension::Id::NormalY, count, ny);
+    //                    view->setField(Dimension::Id::NormalZ, count, nz);
+    //                    view->setField(Dimension::Id::Curvature, count, curv);
+    //                    count++;
+    //                }
+
+    //            }
+
+    //            //cout << "view->size() " << view->size() << endl;
+    //            PointViewSet temp;
+				//temp.insert(view);
+				//roofs.push_back(temp);
+    //        }
+
+
         }
+   
+
+       
 
 
         
 
-        for (PointId i = 0; i < old_view->size(); ++i) {
 
-            /*view->setField(Dimension::Id::X, i, x);
-            view->setField(Dimension::Id::Y, i, y);
-            view->setField(Dimension::Id::Z, i, z);*/
-        }
     }
     void clusterRoofs(float tolerance, size_t min_points) {
         StageFactory factory;
         PointViewSet clusteredRoofs;
 
+        for (int k = 0; k < numClusters; k++) {
+            auto& rd = *roofs[k];
 
-        PointViewSet temp;
-        for (PointViewPtr view : roofs)
-        {
-            if (!view || view->empty())
-                continue;
-
+            
             BufferReader reader;
-            reader.addView(view);
+            reader.addView(*rd.view.begin());
 
-            Stage* dbscanStage = factory.createStage("filters.dbscan");
-            if (!dbscanStage)
-                throw pdal_error("Failed to create filters.dbscan stage");
 
+            Stage* cluster = factory.createStage("filters.cluster");
             Options opts;
-            opts.add("min_points", 10);
-            opts.add("eps", 2.0);
-            opts.add("dimensions", "X,Y,Z");
+            opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
+            opts.add("min_points", min_points);                    //minimum number of points in a cluster
+            cluster->setOptions(opts);
+            cluster->setInput(reader);
+            cluster->prepare(rd.table);
+   
 
-            dbscanStage->setOptions(opts);
-            dbscanStage->setInput(reader);
+            PointViewSet temp = cluster->execute(rd.table);
 
-            // Use the SAME table that was used to create the views:
-            dbscanStage->prepare(rooftable);
-            PointViewSet clusteredViews = dbscanStage->execute(rooftable);
-
-            temp.insert(*clusteredViews.begin());
+            clusteredRoofs.insert(temp.begin(), temp.end());
         }
+        
 
-        //for (PointViewPtr srcView : roofs)
-        //{
-        //    if (!srcView || srcView->empty())
-        //        continue;
 
-        //    // 1) Fresh table JUST for this roof
 
-        //    // 2) Register the dimensions DBSCAN will use
-        //    PointLayoutPtr layout = rooftable.layout();
-        //    layout->registerDim(Dimension::Id::X);
-        //    layout->registerDim(Dimension::Id::Y);
-        //    layout->registerDim(Dimension::Id::Z);
+        //BufferReader reader;
+        //reader.addView(*roofs.begin());
 
-        //    // 3) Set up BufferReader + DBSCAN
+        /*size_t idx = 0;
+        for (const auto& v : roofs)
+        {
+            auto cid = v->layout()->findDim("ClusterID");
+            std::cout << "view " << idx++ << ": "
+                << (cid == pdal::Dimension::Id::Unknown ? "MISSING ClusterID" : "has ClusterID")
+                << "\n";
+        }*/
+
+
+        //Stage* cluster = factory.createStage("filters.cluster");
+        //Options opts;
+        //opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
+        //opts.add("min_points", min_points);                    //minimum number of points in a cluster
+        //cluster->setOptions(opts);
+        //cluster->setInput(reader);
+
+        //cluster->prepare(rooftable);
+        //PointViewSet temp = cluster->execute(rooftable);
+        //clusteredRoofs.insert(temp.begin(), temp.end());
+
+
+		
+
+        //for (const PointViewPtr& v : roofs) {
+
+        //    cout << "\n\n\n " << endl;
+        //    printSchema();
+
+
         //    BufferReader reader;
+        //    reader.addView(v);
 
-        //    Stage* dbscanStage = factory.createStage("filters.dbscan");
-        //    if (!dbscanStage)
-        //        throw pdal_error("Failed to create filters.dbscan stage");
+        //    //pdal::PointTableRef t = v->table();
 
+        //    Stage* cluster = factory.createStage("filters.cluster");
         //    Options opts;
-        //    opts.add("min_points", 10);
-        //    opts.add("eps", 2.0);
-        //    opts.add("dimensions", "X,Y,Z");   // these now exist in layout
+        //    opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
+        //    opts.add("min_points", min_points);                    //minimum number of points in a cluster
+        //    cluster->setOptions(opts);
+        //    cluster->setInput(reader);
 
-        //    dbscanStage->setOptions(opts);
-        //    dbscanStage->setInput(reader);
-
-        //    // 4) Let DBSCAN add ClusterID and finalize the layout
-        //    dbscanStage->prepare(rooftable);
-
-        //    // 5) Create a new view on this table and copy XYZ from the original roof view
-        //    PointViewPtr view(new PointView(rooftable));
-
-        //    for (PointId i = 0; i < srcView->size(); ++i)
-        //    {
-        //        PointId j = view->size();
-
-        //        double x = srcView->getFieldAs<double>(Dimension::Id::X, i);
-        //        double y = srcView->getFieldAs<double>(Dimension::Id::Y, i);
-        //        double z = srcView->getFieldAs<double>(Dimension::Id::Z, i);
-
-        //        view->setField(Dimension::Id::X, j, x);
-        //        view->setField(Dimension::Id::Y, j, y);
-        //        view->setField(Dimension::Id::Z, j, z);
-        //        // ClusterID will be filled by DBSCAN during execute().
-        //    }
-
-        //    reader.addView(view);
-
-        //    // 6) Run DBSCAN – this writes ClusterID into `view`
-        //    PointViewSet out = dbscanStage->execute(rooftable);
-
-        //    // Use the returned views (normally contains `view`)
-        //    clusteredRoofs.insert(out.begin(), out.end());
+        //    
+        //    cluster->prepare(rooftable);
+        //    PointViewSet temp = cluster->execute(rooftable);
+        //    clusteredRoofs.insert(temp.begin(), temp.end());
         //}
 
-        //roofs.swap(clusteredRoofs);
 
 
+        //int hh = 1;
+        //for (const PointViewPtr& v : clusteredRoofs) {
 
-
-
-
-
-        cout << "temp    " << temp.size() << endl;
-
-        int hh = 0;
-        for (PointViewPtr kkk : temp) {
-            cout << "cluster " << hh << endl;
-
-            for (int j = 0; j < kkk->size(); j++) {
-                
-                int ii = kkk->getFieldAs<double>(Dimension::Id::X, j);
-                cout << " " << ii << endl;
-            }
-            hh++;
-        }
+        //    cout << "CLUSTER " << hh << endl;
+        //    for (int i = 0; i < v->size(); i++) {
+        //         int id = v->getFieldAs<double>(Dimension::Id::ClusterID, i);
+        //         cout << "ID " << id << endl;
+        //    }
+        //    hh++;   
+        //}
     }
-    void makeSmallRooofsFile() {
-        string folderName = "folderujem";
+    void makeClusteredRoofsFiles(string folder) {
+
+        /*string folderName = "folderujem";
         if (!filesystem::exists(folderName)) {
             if (filesystem::create_directories(folderName)) {
                 std::cout << "Folder created: " << folderName << '\n';
@@ -646,13 +711,64 @@ public:
             else {
                 std::cout << "Failed to create folder\n";
             }
+        }*/
+
+
+        std::error_code ec;
+        if (filesystem::exists(folder, ec))
+        {
+            filesystem::remove_all(folder, ec);   // recursive
+            if (ec) throw filesystem::filesystem_error("remove_all failed", folder, ec);
+        }
+
+       // filesystem::create_directories(folder);
+        filesystem::create_directories(folder, ec);
+        if (ec) throw filesystem::filesystem_error("create_directories failed", folder, ec);
+
+        /*filesystem::path path = folder;
+        for (const auto& entry : filesystem::directory_iterator(path)) {
+            if (!filesystem::is_regular_file(entry.status()))
+                filesystem::remove(entry.path());
+
+            if (entry.path().extension() == ".txt") {
+                filesystem::remove(entry.path());
+            }
+        }*/
+
+
+        size_t count = 1;
+        for (int i = 0; i < roofs.size(); i++) {
+            string folderName = folder + "/roof" + to_string(count);
+
+            auto& rd = *roofs[i];
+            PointViewPtr ff = *rd.view.begin();
+            cout << "view->size()  " << ff->size() << endl;
+
+            if (ff->size() != 0) {
+                makeClusteredFiles(*rd.view.begin(), folderName);
+                count++;
+            }
+            
+            
+
         }
 
 
+        //for (const auto& v : roofs) {
+        //    
+
+        //    string folderName = folder + "/roof" + to_string(count);
+        //    //makeClusteredFiles(v,folderName);
+        //    count++;
+
+        //}
 
 
 
     }
+    
+
+
 
     BestFitPlane countPlane(vector<Eigen::Vector3d> points) {
 		BestFitPlane plane;
@@ -707,7 +823,6 @@ public:
 
 		return plane;
     }
-
     void computatePlanes() {
 
 
@@ -766,35 +881,40 @@ int main() {
     auto start = chrono::high_resolution_clock::now();
 
     PointReader p;
-    //Stage* stage;
-    //stage = p.loadFile("LiDAR.laz");
-    //stage = p.filterClass6(stage);
-    //stage = p.computeNormals(stage, 16);
-    //stage = p.clusterPoints(stage, 1.5,20);
-    //stage = p.zsmooth(stage,1);
-    //p.execute(stage);
-
-    //
-
-    //p.filterWalls(0.01, 15);
-    ////p.filerByZValue();
-    //p.filterOutliers("statistical", 6, 0.5, 1, 4);
-
-
-    ////p.makeClusteredFiles(false, "roofs");
-    //p.makeClusteredFiles(true , "roofs_afterSmoothing");
-
-    //
-
-
-    //p.makePointViewSetRoofs();
-
-
-     p.computatePlanes();
+    Stage* stage;
+    stage = p.loadFile("LiDAR.laz");
+    stage = p.filterClass6(stage);
+    stage = p.computeNormals(stage, 16);
 
 
 
+    stage = p.clusterPoints(stage, 1.5,20);
+    stage = p.zsmooth(stage,1);
+    p.execute(stage);
 
+    
+
+    p.filterWalls(0.01, 15);
+    //p.filerByZValue();
+    p.filterOutliers("statistical", 6, 0.5, 1, 4);
+
+
+    //p.makeClusteredFiles(false, "roofs");
+    p.makeClusteredFiles(*p.buildpoint.begin(), "kotlety");
+
+
+    
+
+
+    p.makePointViewSetRoofs();
+   
+
+    p.clusterRoofs(0.5, 5);
+    
+	p.makeClusteredRoofsFiles("subroofs");
+
+
+     //p.computatePlanes();
     //Eigen::Matrix3d C;
     //C << 2.0, 0.0, 1.0,
     //    0.0, 6.0, -3.0,
@@ -810,7 +930,7 @@ int main() {
 
 
 
-    //p.clusterRoofs(1.5, 20);
+    
 
     chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
     cout << "\n\nProgram ran in " << elapsedd.count() << " seconds.\n";
