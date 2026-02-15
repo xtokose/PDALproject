@@ -49,12 +49,82 @@ struct BestFitPlane
     double d;                 // D in Ax + By + Cz + D = 0
     Eigen::Vector3d centroid; // point on plane
 };
-
 struct RoofData {
     pdal::PointTable table;
     pdal::PointViewSet view; // contains the PointViewPtrs made from `table`
 };
 
+
+
+class WallFilter : public pdal::Filter
+{
+public:
+    std::string getName() const override { return "filters.walls"; }
+
+private:
+    double m_curvature = 0.0;
+    double m_angle = 0.0;
+    double ratio;
+    vector<double> excludedZ;
+
+    void addArgs(pdal::ProgramArgs& args) override
+    {
+        args.add("curvature", "Curvature ratio threshold", m_curvature);
+        args.add("angle", "Angle ratio threshold", m_angle);
+    }
+
+    pdal::PointViewSet run(pdal::PointViewPtr in) override
+    {
+        auto start = chrono::high_resolution_clock::now();
+        pdal::PointViewPtr out(new pdal::PointView(in->table()));
+        ratio = sin(m_angle * PI / 180.0);
+        
+        for (pdal::PointId i = 0; i < in->size(); ++i)
+        {
+            if (keep(*in, i))                 // your criteria
+                out->appendPoint(*in, i);     // copies all dimensions for point i
+        }
+
+        //debug
+        auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
+        //cout << "Points remaining: " << get_points_size(buildpoint) << endl;
+        double min = *min_element(excludedZ.begin(), excludedZ.end());
+        double max = *max_element(excludedZ.begin(), excludedZ.end());
+        double average = accumulate(excludedZ.begin(), excludedZ.end(), 0.0) / excludedZ.size();
+        /*cout << "min " << min << endl;
+        cout << "max " << max << endl;
+        cout << "average " << average << endl;*/
+
+
+
+
+        pdal::PointViewSet s;
+        s.insert(out);
+        return s;
+    }
+    bool keep(const pdal::PointView& v, pdal::PointId i)
+    {
+        
+        const double nz = v.getFieldAs<double>(pdal::Dimension::Id::NormalZ, i);
+        const double curv = v.getFieldAs<double>(pdal::Dimension::Id::Curvature, i);
+
+
+        if (nz > ratio) {
+            /*if (curv < m_curvature) {
+                return true;
+            }
+            else {
+				excludedZ.push_back(abs(nz));
+            }*/
+
+            return true;
+        }
+        else {
+            excludedZ.push_back(abs(nz));
+            return false;
+        }
+    }
+};
 
 
 class PointReader {
@@ -65,31 +135,18 @@ private:
 
 
     StageFactory factory;
+    PipelineManager manager;
     PointTable mainTable;
 
-    
-    //vector<PointTable> rooftable;
-    size_t numClusters;
+
+
+    size_t number_of_roofs;
 
     size_t get_points_size(PointViewSet& set) {
         size_t size = 0;
         for (auto v : set) size += v->size();
         return size;
     }
-    void makePointFile(string filename) {
-    
-        ofstream file("buildpoints/" + filename);
-        file << fixed << setprecision(2);
-        PointViewPtr view = *buildpoint.begin();
-        for (PointId i = 0; i < view->size(); ++i) {
-            double x = view->getFieldAs<double>(Dimension::Id::X, i);
-            double y = view->getFieldAs<double>(Dimension::Id::Y, i);
-            double z = view->getFieldAs<double>(Dimension::Id::Z, i);
-            file << x << "," << y << "," << z << endl;
-        }
-        file.close();
-    };
-       
     void recomputeNormals() {
         ////not using anywhere currently
         ////not using anywhere currently
@@ -121,18 +178,15 @@ private:
             double id = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
 
 
-            if (id >= 0)               // ignore noise
+            if (id > 0)               // ignore noise
                 set.insert(id);
         }
-
         return set;
     }
 
 
 public:
     PointViewSet buildpoint;
-    //vector<PointViewSet> roofs;
-   // std::deque<pdal::PointTable> rooftable;
     vector<BestFitPlane> planes;
     std::vector<std::unique_ptr<RoofData>> roofs;
 
@@ -192,17 +246,17 @@ public:
         Options opts;
         opts.add("limits", "Classification[6:6]");
         range->setOptions(opts);
-
-
-
-
         range->setInput(*input);
+
+        
+
 
             //debug
         auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
-        if (debug) { cout << "\nFiltering class 6 finished in " << duration.count()/1000. << " miliseconds\n"; }
-        return range;
+        cout << "\n-- Filtering class 6 finished in " << duration.count() / 1000. << " miliseconds\n";
+        //writeToTextFile(*range, "buildpoints/points_after_filtering_class_6.txt");
 
+        return range;
     }
     Stage* computeNormals(Stage* input, size_t nearest_neighbors) {
         auto start = chrono::high_resolution_clock::now();
@@ -213,18 +267,63 @@ public:
         opts.add("knn", nearest_neighbors);                         // number of neighbors
         normal->setOptions(opts);
         normal->setInput(*input);        /////////input
-        //normal->prepare(table);
-        //buildpoint = normal->execute(table);
-
-
+ 
 
             //debug      
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nComputing normals finished in " << duration.count() / 1000. << " miliseconds\n";
-
-        }
+        auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+        cout << "\n-- Computing normals finished in " << duration.count() / 1000. << " miliseconds\n";
         return normal;
+    }
+    Stage* filterWalls(Stage* input, double ratio_curvature, double ratio_angle) {
+        auto start = chrono::high_resolution_clock::now();
+
+        WallFilter* my = new WallFilter();
+        Options o;
+        o.add("curvature", ratio_curvature);
+        o.add("angle", ratio_angle);
+        my->setOptions(o);
+        my->setInput(*input);
+
+
+        //debug
+        auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+        cout << "\n-- Wall filtering finished in " << duration.count() / 1000. << " miliseconds\n";
+        //writeToTextFile(*my, "buildpoints/points_after_wall_filter.txt");
+
+        return my;
+    }
+    Stage* filterOutliers(Stage* input, string method, size_t mean_k, float multiplier, float radius, size_t min_k) {
+        auto start = chrono::high_resolution_clock::now();
+
+
+
+        Stage& outlier = manager.makeFilter("filters.outlier", *input);
+
+        Options opts;
+        if (method == "statistical") {
+            opts.add("method", "statistical");
+            opts.add("mean_k", mean_k);                      //mean number of neighbors  6
+            opts.add("multiplier", multiplier);                //Standard deviation threshold 0.5
+            outlier.setOptions(opts);
+        }
+        else if (method == "radius") {
+            opts.add("method", "radius");
+            opts.add("radius", radius);                     //1
+            opts.add("min_k", min_k);                       //min number of neighbors in radius  5
+        }
+
+
+
+        Stage& rangeb = manager.makeFilter("filters.range", outlier);
+        Options rangeOpts;
+        rangeOpts.add("limits", "Classification![7:7]");
+        rangeb.setOptions(rangeOpts);
+
+        //debug
+        auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+        cout << "\n-- Outlier filtering finished in " << duration.count() / 1000. << " miliseconds\n";
+        //writeToTextFile(rangeb, "buildpoints/points_after_outliers_filter.txt");
+        return &rangeb;
     }
     Stage* clusterPoints(Stage* input, float tolerance, size_t min_points) {
         auto start = chrono::high_resolution_clock::now();
@@ -240,14 +339,13 @@ public:
 
       
         //debug      
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nClustering finished in " << duration.count() / 1000. << " miliseconds\n";
-        }
+        auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+        cout << "\n-- Clustering finished in " << duration.count() / 1000. << " miliseconds\n";
         return cluster;
     }
     Stage* zsmooth(Stage* input, size_t radius) {
-        
+        auto start = chrono::high_resolution_clock::now();
+
         Options zsmoothOptions;
         zsmoothOptions.add("radius", radius);
         zsmoothOptions.add("dim", "Zsmooth");
@@ -264,210 +362,150 @@ public:
         assign->setInput(*zsmooth);
         assign->setOptions(opts);
 
+
+        //debug      
+        auto duration = chrono::duration_cast<chrono::microseconds>(chrono::high_resolution_clock::now() - start);
+        cout << "\n-- Smoothing finished in " << duration.count() / 1000. << " miliseconds\n";
+        //writeToTextFile(*assign, "buildpoints/points_after_smoothing.txt");
+
+
         return assign;
     }
 
+    Stage* addTextWriter(Stage& input, const string& filename)
+    {
+        Stage* w = factory.createStage("writers.text");
 
+        Options o;
+        o.add("filename", filename);   // or "STDOUT"
+        o.add("format", "csv");       // "csv" or "geojson"
+        o.add("order", "X,Y,Z");         // e.g. "X,Y,Z,Intensity,ClusterID"
+        o.add("keep_unspecified", false);   // <-- only write the dims in `order`
+        o.add("write_header", false);
+        o.add("delimiter", ",");
+        o.add("precision", 2);
 
+        w->setOptions(o);
+        w->setInput(input);
+        return w;
+    }
+    void writeToTextFile(Stage& input, const string& filename) {
+        auto writer = addTextWriter(input, filename);
+        PointTable table;
+        writer->prepare(table);
+        writer->execute(table);
+
+        ifstream in(filename);
+        string line;
+        size_t lines = 0;
+        while (std::getline(in, line)) {
+            ++lines;
+        }
+        
+		cout << "Points written to " << filename << endl;
+        cout << "Points remaining " << lines << endl;
+	}
     void execute(Stage* input) {
         auto start2 = chrono::high_resolution_clock::now();
-
 
         input->prepare(mainTable);
         buildpoint = input->execute(mainTable);
 
 
+        unordered_set<double> clusterIDs = getRoofsIDs(*buildpoint.begin());
+        number_of_roofs = clusterIDs.size();
+        
 
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start2);
-            cout << "\Executing point table finished in " << duration.count() / 1000. << " seconds\n";
-            cout << "Points remaining: " << get_points_size(buildpoint) << endl;
-        }
-        makePointFile("points_after_filtering_class_6.txt");
+            //debug
+        auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start2);
+        cout << "\Executing point table finished in " << duration.count() / 1000. << " seconds\n";
+        cout << "Point cloud has been clustered into " << number_of_roofs << " roofs" << endl;
     }
-    void filterWalls(double ratio_curvature, double ratio_angle) {
-        auto start = chrono::high_resolution_clock::now();
-        PointViewSet temporaryset;
-        PointViewPtr view = *buildpoint.begin();
-        PointViewPtr outView = view->makeNew();
-        vector<double> excludedZ;
-        double ratio = sin(ratio_angle * PI / 180.0);
-        
-        for (PointId i = 0; i < view->size(); ++i) {
-
-            double x = view->getFieldAs<double>(Dimension::Id::X, i);
-            double y = view->getFieldAs<double>(Dimension::Id::Y, i);
-            double z = view->getFieldAs<double>(Dimension::Id::Z, i);
-            double nx = view->getFieldAs<double>(Dimension::Id::NormalX, i);
-            double ny = view->getFieldAs<double>(Dimension::Id::NormalY, i);
-            double nz = view->getFieldAs<double>(Dimension::Id::NormalZ, i);
-            double curv = view->getFieldAs<double>(Dimension::Id::Curvature, i);
-
-            if (nz > ratio) {
-                //if (curv < ratio_curvature) {
-                //    outView->appendPoint(*view, i);
-                //}
-
-                outView->appendPoint(*view, i);
-            }
-            else {
-                excludedZ.push_back(abs(nz));
-            }
-
-        }
-        temporaryset.insert(outView);
-        buildpoint = temporaryset;
-
-        
-
-
-        //debug       
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nWall filtering finished in " << duration.count() / 1000. << " seconds\n";
-            cout << "Points remaining: " << get_points_size(buildpoint) << endl;
-            double min = *min_element(excludedZ.begin(), excludedZ.end());
-            double max = *max_element(excludedZ.begin(), excludedZ.end());
-            double average = accumulate(excludedZ.begin(), excludedZ.end(), 0.0) / excludedZ.size();
-            /*cout << "min " << min << endl;
-            cout << "max " << max << endl;
-            cout << "average " << average << endl;*/
-
-        }
-        makePointFile("points_after_wall_filter_" + to_string((int)(ratio_angle)) + "degrees.txt");
-    }
-    void filerByZValue() {
-        auto start = chrono::high_resolution_clock::now();
-        PointViewPtr view = *buildpoint.begin();
-        PointViewSet temporaryset;
-        PointViewPtr outView = view->makeNew();
-
-        
-
-        for (PointId i = 0; i < view->size(); ++i) {
-            bool append = true;
-            for (PointId j = 0; j < view->size(); ++j) {
-                double xi = view->getFieldAs<double>(Dimension::Id::X, i);
-                double yi = view->getFieldAs<double>(Dimension::Id::Y, i);
-                double zi = view->getFieldAs<double>(Dimension::Id::Z, i);
-
-                double xj = view->getFieldAs<double>(Dimension::Id::X, j);
-                double yj = view->getFieldAs<double>(Dimension::Id::Y, j);
-                double zj = view->getFieldAs<double>(Dimension::Id::Z, j);
-
-                
-                if (((abs(xi - xj) < ratio_Zvalue) &&
-                    (abs(yi - yj) < ratio_Zvalue) &&
-                    (zj > zi))) {
-                    j = view->size();
-                    append = false;
-                }
-            }
-            if (append) {
-                outView->appendPoint(*view, i);
-            }
-            
-        }
-
-        temporaryset.insert(outView);
-        buildpoint = temporaryset;
-
-        //debug      
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nFiltering by Z value finished in " << duration.count() / 1000. << " seconds\n";
-            cout << "Points remaining: " << get_points_size(buildpoint) << endl;
-
-        }
-        makePointFile("points_after_Zfilter.txt");
-    }
-    void filterOutliers(string method, size_t mean_k, float multiplier, float radius, size_t min_k) {
-        auto start = chrono::high_resolution_clock::now();
-        PointViewPtr view = *buildpoint.begin();
-
-
-        BufferReader breader;
-        breader.addView(view);
-
-
-
-        PipelineManager manager;
-
-        Stage& outlier = manager.makeFilter("filters.outlier", breader);
-        Options opts;
-        if (method == "statistical") {
-            opts.add("method", "statistical");
-            opts.add("mean_k", mean_k);                      //mean number of neighbors  6
-            opts.add("multiplier", multiplier);                //Standard deviation threshold 0.5
-            outlier.setOptions(opts);
-        }
-        else if (method == "radius") {
-            opts.add("method", "radius");
-            opts.add("radius", radius);                     //1
-            opts.add("min_k", min_k);                       //min number of neighbors in radius  5
-        }
-
-        
-
-        Stage& rangeb = manager.makeFilter("filters.range", outlier);
-        Options rangeOpts;
-        rangeOpts.add("limits", "Classification![7:7]");
-        rangeb.setOptions(rangeOpts);
-        manager.execute();
-
-        PointViewSet result = manager.views();
-        buildpoint = result;
-
-        //debug      
-        if (debug) {
-            auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-            cout << "\nFiltering outliers finished in " << duration.count() / 1000. << " seconds\n";
-            cout << "Points remaining: " << get_points_size(buildpoint) << endl;
-
-        }
-        makePointFile("points_after_outliers_filter.txt");
-    }   
-    void makeClusteredFiles(const PointViewPtr& view , string folder) {
-        
-        /*int cc = 1;
-        cout << "cluster " << cc << endl;
-        cc++;*/
-
     
 
+
+    void filerByZValue() {
+        //auto start = chrono::high_resolution_clock::now();
+        //PointViewPtr view = *buildpoint.begin();
+        //PointViewSet temporaryset;
+        //PointViewPtr outView = view->makeNew();
+
+        //
+
+        //for (PointId i = 0; i < view->size(); ++i) {
+        //    bool append = true;
+        //    for (PointId j = 0; j < view->size(); ++j) {
+        //        double xi = view->getFieldAs<double>(Dimension::Id::X, i);
+        //        double yi = view->getFieldAs<double>(Dimension::Id::Y, i);
+        //        double zi = view->getFieldAs<double>(Dimension::Id::Z, i);
+
+        //        double xj = view->getFieldAs<double>(Dimension::Id::X, j);
+        //        double yj = view->getFieldAs<double>(Dimension::Id::Y, j);
+        //        double zj = view->getFieldAs<double>(Dimension::Id::Z, j);
+
+        //        
+        //        if (((abs(xi - xj) < ratio_Zvalue) &&
+        //            (abs(yi - yj) < ratio_Zvalue) &&
+        //            (zj > zi))) {
+        //            j = view->size();
+        //            append = false;
+        //        }
+        //    }
+        //    if (append) {
+        //        outView->appendPoint(*view, i);
+        //    }
+        //    
+        //}
+
+        //temporaryset.insert(outView);
+        //buildpoint = temporaryset;
+
+        ////debug      
+        //if (debug) {
+        //    auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
+        //    cout << "\nFiltering by Z value finished in " << duration.count() / 1000. << " seconds\n";
+        //    cout << "Points remaining: " << get_points_size(buildpoint) << endl;
+
+        //}
+        //makePointFile("points_after_Zfilter.txt");
+    }
+ 
+
+
+    void makeClusteredFiles(const PointViewPtr& view , string folder) {
+     
+        //getting number of clusters
+        unordered_set<double> clusterIDs = getRoofsIDs(view);
+        double numClusters = clusterIDs.size();
+
+
+
+    
+            //removing existing files
         filesystem::create_directories(folder);
-
-            //removing existing
         filesystem::path path = folder;
-
         for (const auto& entry : filesystem::directory_iterator(path)) {
             if (!filesystem::is_regular_file(entry.status()))
                 continue; // skip subdirs etc.
 
             if (entry.path().extension() == ".txt") {
                 filesystem::remove(entry.path());
+
             }
         }
 
-        
-
-        unordered_set<double> clusterIDs = getRoofsIDs(view);
-
-        numClusters = clusterIDs.size();
-        cout << "numClusters " << numClusters << endl;
-
-        
 
 
+
+            //creating empty files
         vector<ofstream> files;
         files.reserve(numClusters);
-
         for (int i = 0; i < numClusters; i++) {
             files.emplace_back(folder + "/roof" + to_string(i + 1) + ".txt");
             files[i] << fixed << setprecision(3);
         }
-        
-        cout << "sum DONE " << endl;
+  
+            //fillilng files
         for (PointId i = 0; i < view->size(); ++i) {
             double id = view->getFieldAs<double>(Dimension::Id::ClusterID, i);
             double x = view->getFieldAs<double>(Dimension::Id::X, i);
@@ -480,26 +518,24 @@ public:
                 files[id - 1] << x << "," << y << "," << z << endl;
             }
         }
-        cout << "DONE " << endl;
+
+            //closing files
         for (int i = 0; i < numClusters; i++) {
             files[i].close();
         }
 
-        cout << "Number of clusters: " << numClusters << endl;
-
-        
+            //debug
+        cout << numClusters << " files have been created" << endl;
     }
+
+
+
     void makePointViewSetRoofs() {
         PointViewPtr old_view = *buildpoint.begin();
 
-		int sum = 0;
+		//int sum = 0;
 
-        for (int k = 0; k < numClusters; k++) {
-            //rooftable.emplace_back();
-            //PointTable& t = rooftable.back();
-
-           // RoofData rd;
-
+        for (int k = 0; k < number_of_roofs; k++) {
             auto rd = std::make_unique<RoofData>();
 
             //PointTable table;
@@ -513,7 +549,6 @@ public:
             layout->registerDim(Dimension::Id::NormalY);
             layout->registerDim(Dimension::Id::NormalZ);
             layout->registerDim(Dimension::Id::Curvature);
-
             layout->registerDim(Dimension::Id::ClusterID);
 
             int count = 0;
@@ -546,57 +581,14 @@ public:
                 }
 
             }
-            cout << "view->size() " << view->size() << endl;
-			sum += view->size();
+            cout << "Roof " << (k + 1) << " ----- " << view->size() << " points " << endl;
+
+			//sum += view->size();
             PointViewSet temp;
             temp.insert(view);
 
             rd->view.insert(view);
             roofs.push_back(std::move(rd));
-
-
-
-            /////////////
-            
-    //        unordered_set<int> clusterIDs = getRoofsIDs(old_view);
-    //        cout << "clusterIDs.size() " << clusterIDs.size() << endl;
-    //        for (int i = 0; i < clusterIDs.size(); i++) {
-
-    //            int count = 0;
-    //            PointViewPtr view(new PointView(rooftable[k]));
-    //            for (int j = 0; j < old_view->size(); j++) {
-
-    //                size_t clusterID = old_view->getFieldAs<double>(Dimension::Id::ClusterID, j);
-    //                if (clusterID == (i + 1)) {
-
-
-    //                    double x = old_view->getFieldAs<double>(Dimension::Id::X, j);
-    //                    double y = old_view->getFieldAs<double>(Dimension::Id::Y, j);
-    //                    double z = old_view->getFieldAs<double>(Dimension::Id::Z, j);
-    //                    double nx = old_view->getFieldAs<double>(Dimension::Id::NormalX, j);
-    //                    double ny = old_view->getFieldAs<double>(Dimension::Id::NormalY, j);
-    //                    double nz = old_view->getFieldAs<double>(Dimension::Id::NormalZ, j);
-    //                    double curv = old_view->getFieldAs<double>(Dimension::Id::Curvature, j);
-
-
-    //                    view->setField(Dimension::Id::X, count, x);
-    //                    view->setField(Dimension::Id::Y, count, y);
-    //                    view->setField(Dimension::Id::Z, count, z);
-    //                    view->setField(Dimension::Id::NormalX, count, nx);
-    //                    view->setField(Dimension::Id::NormalY, count, ny);
-    //                    view->setField(Dimension::Id::NormalZ, count, nz);
-    //                    view->setField(Dimension::Id::Curvature, count, curv);
-    //                    count++;
-    //                }
-
-    //            }
-
-    //            //cout << "view->size() " << view->size() << endl;
-    //            PointViewSet temp;
-				//temp.insert(view);
-				//roofs.push_back(temp);
-    //        }
-
 
         }
    
@@ -612,7 +604,7 @@ public:
         StageFactory factory;
         PointViewSet clusteredRoofs;
 
-        for (int k = 0; k < numClusters; k++) {
+        for (int k = 0; k < number_of_roofs; k++) {
             auto& rd = *roofs[k];
 
             
@@ -635,73 +627,22 @@ public:
         }
         
 
-
-
-        //BufferReader reader;
-        //reader.addView(*roofs.begin());
-
-        /*size_t idx = 0;
-        for (const auto& v : roofs)
-        {
-            auto cid = v->layout()->findDim("ClusterID");
-            std::cout << "view " << idx++ << ": "
-                << (cid == pdal::Dimension::Id::Unknown ? "MISSING ClusterID" : "has ClusterID")
-                << "\n";
-        }*/
-
-
-        //Stage* cluster = factory.createStage("filters.cluster");
-        //Options opts;
-        //opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
-        //opts.add("min_points", min_points);                    //minimum number of points in a cluster
-        //cluster->setOptions(opts);
-        //cluster->setInput(reader);
-
-        //cluster->prepare(rooftable);
-        //PointViewSet temp = cluster->execute(rooftable);
-        //clusteredRoofs.insert(temp.begin(), temp.end());
-
-
-		
-
-        //for (const PointViewPtr& v : roofs) {
-
-        //    cout << "\n\n\n " << endl;
-        //    printSchema();
-
-
-        //    BufferReader reader;
-        //    reader.addView(v);
-
-        //    //pdal::PointTableRef t = v->table();
-
-        //    Stage* cluster = factory.createStage("filters.cluster");
-        //    Options opts;
-        //    opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
-        //    opts.add("min_points", min_points);                    //minimum number of points in a cluster
-        //    cluster->setOptions(opts);
-        //    cluster->setInput(reader);
-
-        //    
-        //    cluster->prepare(rooftable);
-        //    PointViewSet temp = cluster->execute(rooftable);
-        //    clusteredRoofs.insert(temp.begin(), temp.end());
-        //}
-
-
-
-        //int hh = 1;
-        //for (const PointViewPtr& v : clusteredRoofs) {
-
-        //    cout << "CLUSTER " << hh << endl;
-        //    for (int i = 0; i < v->size(); i++) {
-        //         int id = v->getFieldAs<double>(Dimension::Id::ClusterID, i);
-        //         cout << "ID " << id << endl;
-        //    }
-        //    hh++;   
-        //}
     }
     void makeClusteredRoofsFiles(string folder) {
+        std::error_code ec;
+
+        // Relative path: this is relative to the *current working directory*
+        filesystem::path dir = folder;
+
+        ec.clear();
+
+
+        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
+        if (ec) {
+            std::cerr << "remove_all failed: " << ec.message() << "\n";
+            return;
+        }
+        filesystem::create_directories(folder);
 
         /*string folderName = "folderujem";
         if (!filesystem::exists(folderName)) {
@@ -713,17 +654,21 @@ public:
             }
         }*/
 
+        cout << "whaat " << endl;
 
-        std::error_code ec;
-        if (filesystem::exists(folder, ec))
+
+        //std::error_code ec;
+        //if (filesystem::exists(folder, ec))
         {
-            filesystem::remove_all(folder, ec);   // recursive
-            if (ec) throw filesystem::filesystem_error("remove_all failed", folder, ec);
+            //filesystem::remove_all(folder, ec);   // recursive
+            //if (ec) throw filesystem::filesystem_error("remove_all failed", folder, ec);
         }
 
-       // filesystem::create_directories(folder);
-        filesystem::create_directories(folder, ec);
-        if (ec) throw filesystem::filesystem_error("create_directories failed", folder, ec);
+        
+        //filesystem::create_directories(folder, ec);
+        //if (ec) throw filesystem::filesystem_error("create_directories failed", folder, ec);
+
+
 
         /*filesystem::path path = folder;
         for (const auto& entry : filesystem::directory_iterator(path)) {
@@ -736,32 +681,27 @@ public:
         }*/
 
 
+
         size_t count = 1;
         for (int i = 0; i < roofs.size(); i++) {
             string folderName = folder + "/roof" + to_string(count);
+            cout << "roof " << to_string(count);
 
             auto& rd = *roofs[i];
             PointViewPtr ff = *rd.view.begin();
-            cout << "view->size()  " << ff->size() << endl;
+            cout << " cluster size  " << ff->size() << endl;
 
             if (ff->size() != 0) {
                 makeClusteredFiles(*rd.view.begin(), folderName);
                 count++;
             }
-            
+
             
 
         }
 
 
-        //for (const auto& v : roofs) {
-        //    
 
-        //    string folderName = folder + "/roof" + to_string(count);
-        //    //makeClusteredFiles(v,folderName);
-        //    count++;
-
-        //}
 
 
 
@@ -868,7 +808,7 @@ public:
 
 
 
-
+    
 };
 
 
@@ -885,52 +825,28 @@ int main() {
     stage = p.loadFile("LiDAR.laz");
     stage = p.filterClass6(stage);
     stage = p.computeNormals(stage, 16);
-
-
-
-    stage = p.clusterPoints(stage, 1.5,20);
-    stage = p.zsmooth(stage,1);
+    stage = p.filterWalls(stage, 0.01, 20);
+    stage = p.filterOutliers(stage, "statistical", 6, 0.5, 1, 4);
+    stage = p.clusterPoints(stage, 1.5, 60);
+    stage = p.zsmooth(stage, 1);
     p.execute(stage);
 
-    
 
-    p.filterWalls(0.01, 15);
+
     //p.filerByZValue();
-    p.filterOutliers("statistical", 6, 0.5, 1, 4);
 
 
-    //p.makeClusteredFiles(false, "roofs");
-    p.makeClusteredFiles(*p.buildpoint.begin(), "kotlety");
 
+    p.makeClusteredFiles(*p.buildpoint.begin(), "roofs");
 
     
-
 
     p.makePointViewSetRoofs();
-   
-
-    p.clusterRoofs(0.5, 5);
     
+    p.clusterRoofs(0.2, 40);
+
 	p.makeClusteredRoofsFiles("subroofs");
 
-
-     //p.computatePlanes();
-    //Eigen::Matrix3d C;
-    //C << 2.0, 0.0, 1.0,
-    //    0.0, 6.0, -3.0,
-    //    1.0, -3.0, 2.0;
-    //std::cout << C << endl;
-
-    //Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(C);
-
-
-    // //Eigen returns them in ascending order for SelfAdjointEigenSolver
-    // std::cout << "Eigenvalues:\n" << solver.eigenvalues() << "\n";
-    // std::cout << "Eigenvectors:\n" << solver.eigenvectors() << "\n";
-
-
-
-    
 
     chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
     cout << "\n\nProgram ran in " << elapsedd.count() << " seconds.\n";
