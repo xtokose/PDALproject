@@ -50,11 +50,16 @@ struct BestFitPlane
     Eigen::Vector3d centroid; // point on plane
 };
 struct RoofData {
-    pdal::PointTable table;
-    pdal::PointViewSet view; // contains the PointViewPtrs made from `table`
+    PointTable table;
+    PointViewSet view; // contains the PointViewPtrs made from `table`
 };
+struct MainRoof {
+    unique_ptr<RoofData> roof;
+    vector<unique_ptr<RoofData>> subroof;
+    vector<unique_ptr<RoofData>> msubroof;  //modified subroofs
+    vector<unique_ptr<RoofData>> fsubroof;  //final subroofs
 
-
+};
 
 class WallFilter : public pdal::Filter
 {
@@ -188,8 +193,8 @@ private:
 public:
     PointViewSet buildpoint;
     vector<BestFitPlane> planes;
-    std::vector<std::unique_ptr<RoofData>> roofs;
-
+    //vector<unique_ptr<RoofData>> roofs;
+    vector<MainRoof> roofs;
 
     void printSchema(PointTable table)
     {
@@ -384,16 +389,38 @@ public:
         o.add("write_header", false);
         o.add("delimiter", ",");
         o.add("precision", 2);
+        cout << "3 " << endl;
 
         w->setOptions(o);
         w->setInput(input);
         return w;
     }
     void writeToTextFile(Stage& input, const string& filename) {
+        
+        cout << "2 " << endl;
         auto writer = addTextWriter(input, filename);
+        cout << "4 " << endl;
+
         PointTable table;
         writer->prepare(table);
-        writer->execute(table);
+        cout << "5 " << endl;
+
+
+        auto* layout = table.layout();
+        auto dimX = layout->findDim("X");       // returns Dimension::Id::Unknown if missing
+        std::cerr << "X dim id = " << (int)dimX << "\n";
+
+        try {
+            //writer->prepare(table);
+            writer->execute(table);
+        }
+        catch (const pdal::pdal_error& e) {
+            std::cerr << "PDAL error: " << e.what() << "\n";
+        }
+
+
+        //writer->execute(table);
+        cout << "6 " << endl;
 
         ifstream in(filename);
         string line;
@@ -584,28 +611,262 @@ public:
             cout << "Roof " << (k + 1) << " ----- " << view->size() << " points " << endl;
 
 			//sum += view->size();
-            PointViewSet temp;
-            temp.insert(view);
+            //PointViewSet temp;
+            //temp.insert(view);
 
             rd->view.insert(view);
-            roofs.push_back(std::move(rd));
+
+            MainRoof r;
+            r.roof = move(rd);
+            //roofs.push_back(std::move(rd));
+            roofs.push_back(move(r));
+        }
+
+    }
+
+
+    void fillSubroofs() {
+
+        for (int i = 0; i < number_of_roofs; i++) {
+            PointViewPtr input = *roofs[i].roof->view.begin();
+
+
+
+
+            //getting number of clusters
+            unordered_set<double> clusterIDs = getRoofsIDs(input);
+            double numClusters = clusterIDs.size();
+
+
+            for (int k = 0; k < numClusters; k++) {
+
+                auto rd = std::make_unique<RoofData>();
+                PointLayoutPtr layout = rd->table.layout();
+
+                layout->registerDim(Dimension::Id::X);
+                layout->registerDim(Dimension::Id::Y);
+                layout->registerDim(Dimension::Id::Z);
+                layout->registerDim(Dimension::Id::NormalX);
+                layout->registerDim(Dimension::Id::NormalY);
+                layout->registerDim(Dimension::Id::NormalZ);
+                layout->registerDim(Dimension::Id::Curvature);
+                layout->registerDim(Dimension::Id::ClusterID);
+
+                int count = 0;
+                PointViewPtr view(new PointView(rd->table));
+                for (int j = 0; j < input->size(); j++) {
+
+                    size_t clusterID = input->getFieldAs<double>(Dimension::Id::ClusterID, j);
+                    if (clusterID == (k + 1)) {
+
+
+                        double x = input->getFieldAs<double>(Dimension::Id::X, j);
+                        double y = input->getFieldAs<double>(Dimension::Id::Y, j);
+                        double z = input->getFieldAs<double>(Dimension::Id::Z, j);
+                        double nx = input->getFieldAs<double>(Dimension::Id::NormalX, j);
+                        double ny = input->getFieldAs<double>(Dimension::Id::NormalY, j);
+                        double nz = input->getFieldAs<double>(Dimension::Id::NormalZ, j);
+                        double curv = input->getFieldAs<double>(Dimension::Id::Curvature, j);
+
+
+                        view->setField(Dimension::Id::X, count, x);
+                        view->setField(Dimension::Id::Y, count, y);
+                        view->setField(Dimension::Id::Z, count, z);
+                        view->setField(Dimension::Id::NormalX, count, nx);
+                        view->setField(Dimension::Id::NormalY, count, ny);
+                        view->setField(Dimension::Id::NormalZ, count, nz);
+                        view->setField(Dimension::Id::Curvature, count, curv);
+                        view->setField(Dimension::Id::ClusterID, count, 0);
+
+                        count++;
+                    }
+                }
+
+                rd->view.insert(view);
+                roofs[i].subroof.push_back(move(rd));
+            }
+
 
         }
-   
 
-       
+    }
+    void modifySubroofs() {
+
+        for (int i = 0; i < number_of_roofs; i++) {
 
 
-        
+            for (int k = 0; k < roofs[i].subroof.size(); k++) {
+                PointViewPtr subroof = *roofs[i].subroof[k]->view.begin();
+
+                auto rd = std::make_unique<RoofData>();
+                PointLayoutPtr layout = rd->table.layout();
+
+                layout->registerDim(Dimension::Id::X);
+                layout->registerDim(Dimension::Id::Y);
+                layout->registerDim(Dimension::Id::Z);
+                layout->registerDim(Dimension::Id::Curvature);
+                layout->registerDim(Dimension::Id::ClusterID);
+
+
+                PointViewPtr view(new PointView(rd->table));
+                for (int j = 0; j < subroof->size(); j++) {
+
+                    double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, j);
+                    double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, j);
+                    double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, j);
+
+                    view->setField(Dimension::Id::X, j, nx);
+                    view->setField(Dimension::Id::Y, j, ny);
+                    view->setField(Dimension::Id::Z, j, nz);
+                }
+
+                rd->view.insert(view);
+                roofs[i].msubroof.push_back(move(rd));
+
+            }
+
+            
+
+        }
 
 
     }
-    void clusterRoofs(float tolerance, size_t min_points) {
-        StageFactory factory;
-        PointViewSet clusteredRoofs;
+    void appointClusterID() {
 
-        for (int k = 0; k < number_of_roofs; k++) {
-            auto& rd = *roofs[k];
+        /*for (int i = 0; i < roofs.size(); i++) {
+
+            for (int k = 0; k < roofs[i].subroof.size(); k++) {
+                
+                PointViewPtr view = *roofs[i].subroof[k]->view.begin();
+                *roofs[i].subroof[k]->view.begin()
+            }
+
+        }*/
+    }
+
+    void finalizeSubroofs() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            for (int k = 0; k < roofs[i].msubroof.size(); k++) {
+                
+                PointViewPtr msubroof = *roofs[i].msubroof[k]->view.begin();
+                PointViewPtr subroof = *roofs[i].subroof[k]->view.begin();
+
+                //getting number of clusters
+                unordered_set<double> clusterIDs = getRoofsIDs(msubroof);
+                double numClusters = clusterIDs.size();
+
+
+
+
+                for (int l = 0; l < numClusters; l++) {
+
+                    auto rd = std::make_unique<RoofData>();
+                    PointLayoutPtr layout = rd->table.layout();
+                    layout->registerDim(Dimension::Id::X);
+                    layout->registerDim(Dimension::Id::Y);
+                    layout->registerDim(Dimension::Id::Z);
+                    layout->registerDim(Dimension::Id::NormalX);
+                    layout->registerDim(Dimension::Id::NormalY);
+                    layout->registerDim(Dimension::Id::NormalZ);
+                    layout->registerDim(Dimension::Id::Curvature);
+                    layout->registerDim(Dimension::Id::ClusterID);
+                    PointViewPtr view(new PointView(rd->table));
+
+
+                    int count = 0;
+                    for (int m = 0; m < msubroof->size(); m++) {
+
+                        
+                        size_t clusterID = msubroof->getFieldAs<double>(Dimension::Id::ClusterID, m);
+                        if (clusterID == (l + 1)) {
+
+                            double x = subroof->getFieldAs<double>(Dimension::Id::X, m);
+                            double y = subroof->getFieldAs<double>(Dimension::Id::Y, m);
+                            double z = subroof->getFieldAs<double>(Dimension::Id::Z, m);
+                            double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, m);
+                            double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, m);
+                            double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, m);
+                            double curv = subroof->getFieldAs<double>(Dimension::Id::Curvature, m);
+
+
+
+                            view->setField(Dimension::Id::X, count, x);
+                            view->setField(Dimension::Id::Y, count, y);
+                            view->setField(Dimension::Id::Z, count, z);
+                            view->setField(Dimension::Id::NormalX, count, nx);
+                            view->setField(Dimension::Id::NormalY, count, ny);
+                            view->setField(Dimension::Id::NormalZ, count, nz);
+                            view->setField(Dimension::Id::Curvature, count, curv);
+                            view->setField(Dimension::Id::ClusterID, count, 0);
+                            count++;
+                        }
+                    }
+                    rd->view.insert(view);
+                    roofs[i].fsubroof.push_back(move(rd));
+
+
+                }
+
+                
+
+
+            }
+        }
+
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+
+            cout << "oroof " << i << " contains " << roofs[i].subroof.size() << " subroofs " << endl;
+            cout << "froof " << i << " contains " << roofs[i].fsubroof.size() << " subroofs " << endl;
+            cout << " " << endl;
+
+        }
+
+
+
+    }
+
+    void clusterByPoints(float tolerance, size_t min_points) {
+
+
+        vector<RoofData*> tt;
+        for (auto& r : roofs) {
+            if (r.roof) {
+                tt.push_back(r.roof.get());   // <-- NO move
+            }
+        }
+
+        cluster(tt, tolerance, min_points);
+    }
+    void clusterByNormals(float tolerance, size_t min_points) {
+
+       
+        
+        for (int i = 0; i < roofs.size(); i++) {
+
+            cout << "clustering roof " << i << endl;
+            vector<RoofData*> tt;
+            for (int j = 0; j < roofs[i].msubroof.size(); j++) {
+                tt.push_back(roofs[i].msubroof[j].get());
+
+            }
+            cluster(tt, tolerance, min_points);
+
+        }
+     
+        
+
+    }
+    void cluster(const vector<RoofData*>& roof, float tolerance, size_t min_points) {
+        //StageFactory factory;
+
+
+        for (int k = 0; k < roof.size(); k++) {
+            auto& rd = *roof[k];
 
             
             BufferReader reader;
@@ -621,9 +882,7 @@ public:
             cluster->prepare(rd.table);
    
 
-            PointViewSet temp = cluster->execute(rd.table);
-
-            clusteredRoofs.insert(temp.begin(), temp.end());
+            cluster->execute(rd.table);
         }
         
 
@@ -687,7 +946,7 @@ public:
             string folderName = folder + "/roof" + to_string(count);
             cout << "roof " << to_string(count);
 
-            auto& rd = *roofs[i];
+            auto& rd = *roofs[i].roof;
             PointViewPtr ff = *rd.view.begin();
             cout << " cluster size  " << ff->size() << endl;
 
@@ -707,8 +966,95 @@ public:
 
     }
     
+    void printFinalRoofs(string folder) {
 
 
+
+
+        error_code ec;
+        filesystem::path dir = folder;
+        ec.clear();
+
+        filesystem::create_directories(folder);
+        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
+        if (ec) {
+            std::cerr << "remove_all failed: " << ec.message() << "\n";
+            return;
+        }
+        filesystem::create_directories(folder);
+        cout << "done " << endl;
+
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            string path = folder + "/roof" + to_string(i + 1);
+ 
+            filesystem::create_directories(path);
+
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                string fileName = path + "/subroof" + to_string(j + 1) + ".txt";
+                size_t n = printCloud(roofs[i].fsubroof[j]->view, fileName);
+                cout << "roof " << i << "subroof " << j << " ----- " << n << endl;
+
+                /*PointViewPtr inputView = *roofs[i].fsubroof[j]->view.begin();
+                std::cerr
+                    << "has X=" << inputView->hasDim(pdal::Dimension::Id::X)
+                    << " Y=" << inputView->hasDim(pdal::Dimension::Id::Y)
+                    << " Z=" << inputView->hasDim(pdal::Dimension::Id::Z)
+                    << "\n";
+                double x = inputView->getFieldAs<double>(Dimension::Id::X, 0);
+                double y = inputView->getFieldAs<double>(Dimension::Id::Y, 0);
+                double z = inputView->getFieldAs<double>(Dimension::Id::Z, 0);
+                cout << "x " << x << " " << y << " " << z << endl;
+
+
+                cout << "1 " << endl;
+                BufferReader reader;
+                reader.addView(inputView);
+                
+
+                string name = path + "/roof" + to_string(j + 1);
+                writeToTextFile(reader, name);*/
+
+            }
+
+        }
+    }
+
+
+    size_t printCloud(const PointViewSet& pvs, const string& filePath) {
+
+
+        std::ofstream out(filePath);
+        //if (!out.is_open())
+          //  throw std::runtime_error("Failed to open output file: " + filePath);
+
+ 
+        out.setf(std::ios::fixed);
+        out << std::setprecision(2);
+
+ 
+        size_t written = 0;
+
+        for (const PointViewPtr& view : pvs)
+        {
+            if (!view) continue;
+
+            for (PointId i = 0; i < view->size(); ++i)
+            {
+                // PDAL standard coordinate dimensions:
+                const double x = view->getFieldAs<double>(pdal::Dimension::Id::X, i);
+                const double y = view->getFieldAs<double>(pdal::Dimension::Id::Y, i);
+                const double z = view->getFieldAs<double>(pdal::Dimension::Id::Z, i);
+                out << x << "," << y << "," << z << "\n";
+                ++written;
+            }
+        }
+
+        return written;
+    }
 
     BestFitPlane countPlane(vector<Eigen::Vector3d> points) {
 		BestFitPlane plane;
@@ -835,17 +1181,23 @@ int main() {
 
     //p.filerByZValue();
 
-
-
-    p.makeClusteredFiles(*p.buildpoint.begin(), "roofs");
-
-    
-
     p.makePointViewSetRoofs();
-    
-    p.clusterRoofs(0.2, 40);
 
+
+    
+    p.makeClusteredFiles(*p.buildpoint.begin(), "roofs");
+    p.clusterByPoints(0.25, 40);
 	p.makeClusteredRoofsFiles("subroofs");
+    
+    p.fillSubroofs();
+    cout << "filled " << endl;
+    p.modifySubroofs();
+    cout << "modified " << endl;
+
+    p.clusterByNormals(0.1, 20);
+    p.finalizeSubroofs();
+
+    p.printFinalRoofs("finalRoofs");
 
 
     chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
