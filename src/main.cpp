@@ -51,6 +51,18 @@ struct BestFitPlane
     double d;                 // D in Ax + By + Cz + D = 0
     Eigen::Vector3d centroid; // point on plane
 };
+struct Line3D {
+    Eigen::Vector3d p;   // point on line
+    Eigen::Vector3d dir; // direction (not necessarily normalized)
+    vector<int> origin;
+};
+
+
+struct MeshReadyView
+{
+    std::shared_ptr<pdal::PointTable> table; // must stay alive with the view
+    pdal::PointViewPtr view;
+};
 struct RoofData {
     PointTable table;
     PointViewSet view; // contains the PointViewPtrs made from `table`
@@ -62,6 +74,13 @@ struct MainRoof {
     vector<unique_ptr<RoofData>> nsubroof;  //subroofs clustered by normal vectors
     vector<unique_ptr<RoofData>> fsubroof;
     vector<BestFitPlane> plane;
+	vector<Line3D> lines;
+
+    vector<TriangularMesh*> initial_mesh;
+    vector<TriangularMesh> new_mesh;
+    vector<MeshReadyView> mesh_ready_view;
+    vector<vector<PointId>> jacket;
+
 
 };
 class WallFilter : public pdal::Filter
@@ -135,21 +154,16 @@ private:
 };
 
 
+
 class PointReader {
 private:
     bool debug = false;
-    double ratio_Zvalue = 0;
-
-
-
     StageFactory factory;
     PipelineManager manager;
     PointTable mainTable;
 
 
-
     size_t number_of_roofs;
-
     size_t get_points_size(PointViewSet& set) {
         size_t size = 0;
         for (auto v : set) size += v->size();
@@ -194,8 +208,6 @@ private:
 
 public:
     PointViewSet buildpoint;
-    //vector<BestFitPlane> planes;
-    //vector<unique_ptr<RoofData>> roofs;
     vector<MainRoof> roofs;
 
 
@@ -225,8 +237,6 @@ public:
             }
         }
     }
-
-
 
     Stage* loadFile(string filepath) {
         auto start = chrono::high_resolution_clock::now();
@@ -559,8 +569,6 @@ public:
             //debug
         cout << numClusters << " files have been created" << endl;
     }
-
-
 
     void makePointViewSetRoofs() {
         PointViewPtr old_view = *buildpoint.begin();
@@ -1263,19 +1271,6 @@ public:
     void computatePlanes() {
 
 
-        /*Eigen::Vector3d b1(0, 0, 1);
-        Eigen::Vector3d b2(2, 0, 2);
-        Eigen::Vector3d b3(1, 3, 0);
-        Eigen::Vector3d b4(1, 0, 1.5);
-        Eigen::Vector3d b5(1, 3, 1);
-		vector<Eigen::Vector3d> testPoints = { b1, b2, b3, b4, b5 };
-        BestFitPlane plane = countPlane(testPoints);
-
-        cout << "x " << plane.normal.x() << endl;
-        cout << "y " << plane.normal.y() << endl;
-        cout << "z " << plane.normal.z() << endl;
-        cout << "d " << plane.d << endl;*/
-
 
         for (int i = 0; i < roofs.size(); i++) {
 
@@ -1310,28 +1305,6 @@ public:
         }
 
 
-   //     int cc = 1;
-   //     for (PointViewPtr view : roofs) {
-
-			//vector<Eigen::Vector3d> points;
-   //         for (PointId i = 0; i < view->size(); ++i) {
-   //             double x = view->getFieldAs<double>(Dimension::Id::X, i);
-   //             double y = view->getFieldAs<double>(Dimension::Id::Y, i);
-   //             double z = view->getFieldAs<double>(Dimension::Id::Z, i);
-			//	Eigen::Vector3d point(x, y, z);
-			//	points.push_back(point);
-   //         }
-   //         BestFitPlane plane = countPlane(points);
-			////planes.push_back(plane);
-
-   //         cout << "\n\nPLANE " << cc << endl;
-   //         cout << "x " << plane.normal.x() << endl;
-   //         cout << "y " << plane.normal.y() << endl;
-   //         cout << "z " << plane.normal.z() << endl;
-   //         cout << "d " << plane.d << endl;
-   //         cc++;
-
-   //     }
 
 
     }
@@ -1381,94 +1354,98 @@ public:
 
     }
 
-
-    //TriangularMesh* buildDelaunayMesh(PointViewPtr inView)
-    //{
-    //    PointTableRef table = inView->table();
-    //    BufferReader reader;
-    //    reader.addView(inView);
-
-    //    DelaunayFilter delaunay;
-    //    delaunay.setInput(reader);
-
-    //    PlyWriter writer;
-    //    writer.setInput(delaunay);
-
-    //    Options wopts;
-    //    wopts.add("filename", "delaunay_mesh.ply");
-    //    wopts.add("faces", true);           // write triangles
-    //    wopts.add("storage_mode", "little endian");
-    //    writer.setOptions(wopts);
-
-    //    // This runs reader + delaunay + writer
-    //    writer.prepare(table);
-    //    writer.execute(table);
-
-    //    // Delaunay already attached the mesh to the same view
-    //    TriangularMesh* mesh = inView->mesh("delaunay2d");
-    //    if (!mesh)
-    //        throw std::runtime_error("Mesh 'delaunay2d' was not created.");
-
-    //    return mesh;
-    //}
     double distanceBetweenPoints(double x1, double y1, double x2, double y2) {
         double dx = x2 - x1;
         double dy = y2 - y1;
         return sqrt(dx * dx + dy * dy);
     }
 
-    TriangularMesh* buildDelaunayMesh(PointViewPtr inView)
+    //TriangularMesh* buildDelaunayMesh(PointViewPtr inView)
+    //{
+
+    //    // If mesh already exists, do not run Delaunay again (would throw on duplicate mesh name).
+    //    if (auto* existing = inView->mesh("delaunay2d"))
+    //        return existing;
+
+    //    PointTableRef table = inView->table();
+
+    //    BufferReader reader;
+    //    reader.addView(inView);
+
+    //    DelaunayFilter delaunay;
+    //    delaunay.setInput(reader);
+
+    //    // Run ONLY the Delaunay stage.
+    //    delaunay.prepare(table);
+    //    delaunay.execute(table);
+
+    //    // Delaunay attaches mesh to the same view (inView).
+    //    inView->mesh("delaunay2d");
+    //    
+
+    //    TriangularMesh* mesh = inView->mesh("delaunay2d");
+
+    //    return mesh;
+    //}
+    MeshReadyView buildDelaunayMesh(MeshReadyView data)
     {
 
-        // If mesh already exists, do not run Delaunay again (would throw on duplicate mesh name).
-        if (auto* existing = inView->mesh("delaunay2d"))
-            return existing;
-
-        PointTableRef table = inView->table();
-
         BufferReader reader;
-        reader.addView(inView);
+        reader.addView(data.view);
 
-        DelaunayFilter delaunay;
-        delaunay.setInput(reader);
+        DelaunayFilter filter;
+        filter.setInput(reader);
 
-        // Run ONLY the Delaunay stage.
-        delaunay.prepare(table);
-        delaunay.execute(table);
+        filter.prepare(*data.table);
+        PointViewSet outViews = filter.execute(*data.table);
 
-        // Delaunay attaches mesh to the same view (inView).
-        inView->mesh("delaunay2d");
-        
+        if (outViews.empty())
+            throw std::runtime_error("Delaunay returned no output view.");
 
-        TriangularMesh* mesh = inView->mesh("delaunay2d");
-
-        return mesh;
+        data.view = *outViews.begin();
+        return data;
     }
-    void writeMeshToPly(PointViewPtr view, const string& filename)
+    void writeMeshToPly(const MeshReadyView& data, const string& filename)
     {
 
-        // Optional safety check: ensure mesh exists before writing faces.
-        if (!view->mesh("delaunay2d"))
-            throw std::runtime_error(
-                "writeMeshToPly: Mesh 'delaunay2d' not found. Call buildDelaunayMesh(view) first.");
-
-
-        PointTableRef table = view->table();
-
         BufferReader reader;
-        reader.addView(view);
+        reader.addView(data.view);
 
         PlyWriter writer;
         writer.setInput(reader);
 
         Options wopts;
         wopts.add("filename", filename);
-        wopts.add("faces", true);                 // write triangle faces
-        wopts.add("storage_mode", "little endian"); // binary PLY (keeps precision)
+        wopts.add("faces", true);
+        wopts.add("storage_mode", "little endian");
         writer.setOptions(wopts);
 
-        writer.prepare(table);
-        writer.execute(table);
+
+
+        cout << "wr " << endl;
+        writer.prepare(*data.table);
+        writer.execute(*data.table);
+
+        //PointTableRef table = view->table();
+
+        //BufferReader reader;
+        //reader.addView(view);
+
+        //PlyWriter writer;
+        //writer.setInput(reader);
+
+        //Options wopts;
+        //wopts.add("filename", filename);
+        //wopts.add("faces", true);                 // write triangle faces
+        //wopts.add("storage_mode", "little endian"); // binary PLY (keeps precision)
+        //writer.setOptions(wopts);
+
+        //cout << "-1 "  << endl;
+        //writer.prepare(table);
+
+        //writer.execute(table);
+        //cout << "-3 " << endl;  
+    
     }
 
 
@@ -1478,9 +1455,11 @@ public:
       
 
         TriangularMesh outMesh;
+        cout << "mesh->size() " << mesh->size() << endl;
         for (const Triangle& t : *mesh)
         {
             PointId a = t.m_a, b = t.m_b, c = t.m_c;
+
 
             double ax = view->getFieldAs<double>(Dimension::Id::X, a);
             double ay = view->getFieldAs<double>(Dimension::Id::Y, a);
@@ -1663,6 +1642,235 @@ public:
     }
 
 
+    bool intersectPlanes(const BestFitPlane& p1, const BestFitPlane& p2, Line3D& out, double eps = 1e-12)
+    {
+        Eigen::Vector3d u = p1.normal.cross(p2.normal);
+        double denom = u.squaredNorm();
+
+        if (denom < eps) {
+            // Planes are parallel (or nearly). Could be distinct or the same plane.
+            return false;
+        }
+
+        // Point on intersection line:
+        Eigen::Vector3d p0 = ((p2.d * p1.normal - p1.d * p2.normal).cross(u)) / denom;
+
+        out.p = p0;
+        out.dir = u; // you can normalize if you want: u.normalized()
+        return true;
+    }
+
+
+    void computateLines() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+            cout << "ROOF " << i << endl;
+
+
+			int linescount = 0;
+            for (int j = 0; j < roofs[i].plane.size() -1; j++) {
+                for (int k = j + 1; k < roofs[i].plane.size(); k++) {
+
+					linescount++;
+                    Line3D line;
+                    intersectPlanes(roofs[i].plane[j], roofs[i].plane[k], line);
+                    line.origin.push_back(j);
+                    line.origin.push_back(k);
+                    cout << "Line " << linescount << " of plane " << j + 1 << " and plane " << k + 1 << endl;
+                    cout << line.p.x() << "," << line.p.y() << "," << line.p.z() << endl;
+					cout << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << endl << endl;
+                }
+
+                
+            }
+        }
+	}
+
+    void computateMeshes() {
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+               //TriangularMesh* m = buildDelaunayMesh(*roofs[i].fsubroof[j]->view.begin());
+               //MeshReadyView m = buildDelaunayMesh(*roofs[i].fsubroof[j]->view.begin());
+                auto clean = makeMeshReadyViewDeep(*roofs[i].fsubroof[j]->view.begin());
+                clean = buildDelaunayMesh(clean);
+                //TriangularMesh* mesh = clean.view->mesh("delaunay2d");
+                
+                roofs[i].mesh_ready_view.push_back(clean);
+
+				TriangularMesh* mesh = roofs[i].mesh_ready_view[j].view->mesh("");
+                
+                roofs[i].initial_mesh.push_back(mesh);
+            }
+        }
+
+    }
+    MeshReadyView makeMeshReadyView(const pdal::PointViewPtr& src)
+    {
+        using namespace pdal;
+
+        auto table = std::make_shared<PointTable>();
+        auto layout = table->layout();
+
+        auto keepIfExists = [&](Dimension::Id id)
+            {
+                if (src->layout()->hasDim(id))
+                    layout->registerDim(id);
+            };
+
+        // Keep only dimensions safe/useful for mesh export
+        keepIfExists(Dimension::Id::X);
+        keepIfExists(Dimension::Id::Y);
+        keepIfExists(Dimension::Id::Z);
+        keepIfExists(Dimension::Id::NormalX);
+        keepIfExists(Dimension::Id::NormalY);
+        keepIfExists(Dimension::Id::NormalZ);
+        keepIfExists(Dimension::Id::Curvature);
+
+        pdal::PointViewPtr dst(new pdal::PointView(*table));
+
+        for (pdal::PointId i = 0; i < src->size(); ++i)
+            dst->appendPoint(*src, i);   // copies only dimensions registered above
+
+        return { table, dst };
+    }
+    MeshReadyView makeMeshReadyViewDeep(const pdal::PointViewPtr& src)
+    {
+        using namespace pdal;
+
+        MeshReadyView out;
+        out.table = std::make_shared<PointTable>();
+        auto layout = out.table->layout();
+
+        auto keep = [&](Dimension::Id id)
+            {
+                if (src->layout()->hasDim(id))
+                    layout->registerDim(id);
+            };
+
+        keep(Dimension::Id::X);
+        keep(Dimension::Id::Y);
+        keep(Dimension::Id::Z);
+        keep(Dimension::Id::NormalX);
+        keep(Dimension::Id::NormalY);
+        keep(Dimension::Id::NormalZ);
+        keep(Dimension::Id::Curvature);
+
+        out.view.reset(new PointView(*out.table));
+
+        for (pdal::PointId i = 0; i < src->size(); ++i)
+        {
+            pdal::PointId id = out.view->size();
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::X))
+                out.view->setField(pdal::Dimension::Id::X, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::X, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Y))
+                out.view->setField(pdal::Dimension::Id::Y, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Y, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Z))
+                out.view->setField(pdal::Dimension::Id::Z, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Z, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalX))
+                out.view->setField(pdal::Dimension::Id::NormalX, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalX, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalY))
+                out.view->setField(pdal::Dimension::Id::NormalY, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalY, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalZ))
+                out.view->setField(pdal::Dimension::Id::NormalZ, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalZ, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Curvature))
+                out.view->setField(pdal::Dimension::Id::Curvature, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Curvature, i));
+        }
+
+        return out;
+    }
+
+    void printMeshes(string folder) {
+
+        filesystem::create_directories(folder);
+        for (int i = 0; i < roofs.size(); i++) {
+
+
+            string path = folder + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path);
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+				auto clean = roofs[i].mesh_ready_view[j];
+               // auto clean = makeMeshReadyViewDeep(*roofs[i].fsubroof[j]->view.begin());
+                //clean = buildDelaunayMesh(clean);
+
+                std::cout << "points: " << clean.view->size() << '\n';
+                std::cout << "mesh: " << (clean.view->mesh("delaunay2d") ? "yes" : "no") << '\n';
+
+                cout << "j " << j << endl;
+                string name = folder + "/roof" + to_string(i + 1) + "/subroof" + to_string(j + 1) + "mesh.ply";
+                cout << "name     " << name << endl;
+
+                writeMeshToPly(clean, name);
+     
+            }
+        }
+    }
+        
+
+    void cutRoofs() {
+
+
+        cout << "roofs.size() " << roofs.size() << endl;
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            cout << "roofs[i].fsubroof.size() " << roofs[i].fsubroof.size() << endl;
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                //TriangularMesh nm = cutMesh(*roofs[i].fsubroof[j]->view.begin(), roofs[i].initial_mesh[j], 0.25);
+                TriangularMesh nm = cutMesh(roofs[i].mesh_ready_view[j].view, roofs[i].initial_mesh[j], 0.5);
+    
+                //attachTriangularMesh(*roofs[i].fsubroof[j]->view.begin(), nm);
+                attachTriangularMesh(roofs[i].mesh_ready_view[j].view, nm);
+
+				roofs[i].new_mesh.push_back(nm);
+
+            }
+        }
+    }
+    void getJackets() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                TriangularMesh m = roofs[i].new_mesh[j];
+                vector<PointId> k = hollowMesh(*roofs[i].fsubroof[j]->view.begin(), m);
+                roofs[i].jacket.push_back(k);
+
+            }
+        }
+    }
+    void printJackets(string folder) {
+
+        filesystem::create_directories(folder);
+        for (int i = 0; i < roofs.size(); i++) {
+            string path = folder + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path);
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+                string fileName = path + "/jacket" + to_string(j + 1) + ".txt";
+                getBorder(*roofs[i].fsubroof[j]->view.begin(), &roofs[i].jacket[j], fileName);
+            }
+        }
+    }
+
+
 
 };
 
@@ -1702,15 +1910,17 @@ int main() {
     auto start = chrono::high_resolution_clock::now();
     PointReader p;
 
-    pdal::PointTable table;
+   /* pdal::PointTable table;
     pdal::PointViewPtr view = loadXYZ_withReaderText(table, "C:/C/PointReader/build/finalRoofs/roof1/subroof2.txt");
     cout << "size " << view->size() << endl;
 
+
+
     TriangularMesh* m = p.buildDelaunayMesh(view);
     cout << "mesh size " << m->size() << endl;
-
-
+    
     p.writeMeshToPly(view, "C:/C/PointReader/build/mesh_2.ply");
+
 
     TriangularMesh nm = p.cutMesh(view, m, 0.25);
 	p.attachTriangularMesh(view, nm);
@@ -1718,76 +1928,61 @@ int main() {
 
 
 	vector<PointId> k = p.hollowMesh(view, nm);
-    p.getBorder(view, &k, "border2.txt");
+    p.getBorder(view, &k, "border2.txt");*/
 
-    //p.attachTriangularMesh(view, nm);
-    //p.writeMeshToPly(view, "C:/C/PointReader/build/mesh3.ply");
 
-    /*double minX = std::numeric_limits<double>::infinity();
-    double minY = std::numeric_limits<double>::infinity();
-    double minZ = std::numeric_limits<double>::infinity();
-    double maxX = -minX, maxY = -minY, maxZ = -minZ;
 
-    for (pdal::PointId i = 0; i < view->size(); ++i)
-    {
-        double x = view->getFieldAs<double>(pdal::Dimension::Id::X, i);
-        double y = view->getFieldAs<double>(pdal::Dimension::Id::Y, i);
-        double z = view->getFieldAs<double>(pdal::Dimension::Id::Z, i);
 
-        minX = std::min_element(minX, x); maxX = std::max_element(maxX, x);
-        minY = std::min_element(minY, y); maxY = std::max_element(maxY, y);
-        minZ = std::min_element(minZ, z); maxZ = std::max_element(maxZ, z);
-    }
 
-    std::cout << "X: [" << minX << ", " << maxX << "]\n";
-    std::cout << "Y: [" << minY << ", " << maxY << "]\n";
-    std::cout << "Z: [" << minZ << ", " << maxZ << "]\n";*/
+    Stage* stage;
+    stage = p.loadFile("LiDAR.laz");
+    stage = p.filterClass6(stage);
+    stage = p.computeNormals(stage, 16);
+    stage = p.filterWalls(stage, 0.01, 20);
+    stage = p.filterOutliers(stage, "statistical", 6, 0.5, 1, 4);
+    stage = p.clusterPoints(stage, 1.5, 60);            //klasterizacia vsetkych bodov na hlavne strechy
+    stage = p.zsmooth(stage, 1);
+    p.execute(stage);
 
+
+
+    //p.filerByZValue();
+
+    p.makePointViewSetRoofs();
+    p.makeClusteredFiles(*p.buildpoint.begin(), "roofs");
+
+
+    p.clusterByPoints("mainroofs", 0.25, 60);                //klasterizacia hlavnych striech na podstrechy
+	p.makeClusteredRoofsFiles("subroofs");
+    p.fillSubroofs();
+    p.modifySubroofs();
+    p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
+    p.finalizeSubroofs();
+    p.printFinalRoofs("finalRoofs");
+
+
+
+    p.clusterByPoints("nroofs", 0.25, 60);
+    p.endSubroofs();
+    p.printFinalRoofs22("finalRoofsTotal");
 
     
+    p.computatePlanes();
+    p.printPlanes("planes");
+	//p.computateLines();
 
 
 
-
- //   Stage* stage;
- //   stage = p.loadFile("LiDAR.laz");
- //   stage = p.filterClass6(stage);
- //   stage = p.computeNormals(stage, 16);
- //   stage = p.filterWalls(stage, 0.01, 20);
- //   stage = p.filterOutliers(stage, "statistical", 6, 0.5, 1, 4);
- //   stage = p.clusterPoints(stage, 1.5, 60);            //klasterizacia vsetkych bodov na hlavne strechy
- //   stage = p.zsmooth(stage, 1);
- //   p.execute(stage);
-
-
-
- //   //p.filerByZValue();
-
- //   p.makePointViewSetRoofs();
- //   p.makeClusteredFiles(*p.buildpoint.begin(), "roofs");
-
-
-
- //   p.clusterByPoints("mainroofs", 0.25, 60);                //klasterizacia hlavnych striech na podstrechy
-	//p.makeClusteredRoofsFiles("subroofs");
- //   p.fillSubroofs();
-
- //   p.modifySubroofs();
-
- //   p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
- //   p.finalizeSubroofs();
- //   p.printFinalRoofs("finalRoofs");
-
-
-
- //   p.clusterByPoints("nroofs", 0.25, 60);
- //   p.endSubroofs();
- //   p.printFinalRoofs22("finalRoofsTotal");
-
- //   
- //   p.computatePlanes();
- //   p.printPlanes("planes");
-
+    p.computateMeshes();
+    cout << "1 " << endl;
+    p.printMeshes("initialMeshes");
+    cout << "2 " << endl;
+    p.cutRoofs();
+    cout << "3 " << endl;
+    p.printMeshes("cutMeshes");
+    cout << "4 " << endl;
+    p.getJackets();
+    p.printJackets("jackets");
 
 
 
