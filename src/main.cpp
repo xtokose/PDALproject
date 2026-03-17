@@ -1824,7 +1824,7 @@ public:
     }
         
 
-    void cutRoofs() {
+    void cutRoofs(double alpha) {
 
 
         cout << "roofs.size() " << roofs.size() << endl;
@@ -1835,7 +1835,7 @@ public:
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
                 //TriangularMesh nm = cutMesh(*roofs[i].fsubroof[j]->view.begin(), roofs[i].initial_mesh[j], 0.25);
-                TriangularMesh nm = cutMesh(roofs[i].mesh_ready_view[j].view, roofs[i].initial_mesh[j], 0.5);
+                TriangularMesh nm = cutMesh(roofs[i].mesh_ready_view[j].view, roofs[i].initial_mesh[j], alpha);
     
                 //attachTriangularMesh(*roofs[i].fsubroof[j]->view.begin(), nm);
                 attachTriangularMesh(roofs[i].mesh_ready_view[j].view, nm);
@@ -1977,12 +1977,12 @@ int main() {
     cout << "1 " << endl;
     p.printMeshes("initialMeshes");
     cout << "2 " << endl;
-    p.cutRoofs();
+    p.cutRoofs(0.25);
     cout << "3 " << endl;
-    p.printMeshes("cutMeshes");
+    p.printMeshes("cutMeshes25");
     cout << "4 " << endl;
     p.getJackets();
-    p.printJackets("jackets");
+    p.printJackets("jackets25");    
 
 
 
