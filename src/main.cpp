@@ -94,12 +94,10 @@ struct RoofData {
 };
 struct MainRoof {
     unique_ptr<RoofData> roof;
+    unique_ptr<RoofData> msubroof; //modified subroofs (points are normal vectors)
 
-
-    vector<unique_ptr<RoofData>> subroof;
-    vector<unique_ptr<RoofData>> msubroof;  //modified subroofs (points are normal vectors)
     vector<unique_ptr<RoofData>> nsubroof;  //subroofs clustered by normal vectors
-    vector<unique_ptr<RoofData>> fsubroof;
+    vector<unique_ptr<RoofData>> fsubroof;  //final subroofs
 
 
 
@@ -188,7 +186,7 @@ private:
 
 class PointReader {
 private:
-    bool print_progress = false;
+    bool print_progress = true;
     StageFactory factory;
     PipelineManager manager;
     PointTable mainTable;
@@ -238,13 +236,537 @@ private:
     }
 
 
-    double distanceToLine(const Line3D& line, const Eigen::Vector3d& point)
+    void writeLineToFile(const std::string& filename, const Vector3d& p0, const Vector3d& dir)
+    {
+        std::ofstream file(filename, std::ios::app);
+
+
+
+        file << std::fixed << std::setprecision(6) << p0.x() << ", " << p0.y() << ", " << p0.z() << "\n";
+        file << std::fixed << std::setprecision(6) << dir.x() << ", " << dir.y() << ", " << dir.z() << "\n";
+    }
+
+
+
+
+
+
+        //roofs
+    using RoofVec = vector<unique_ptr<RoofData>>;
+    void createNewCloud(PointViewPtr input, RoofVec& out) {
+
+        //getting number of clusters
+        unordered_set<double> clusterIDs = getRoofsIDs(input);
+        double numClusters = clusterIDs.size();
+
+
+        for (int k = 0; k < numClusters; k++) {
+
+            auto rd = std::make_unique<RoofData>();
+            PointLayoutPtr layout = rd->table.layout();
+
+            layout->registerDim(Dimension::Id::X);
+            layout->registerDim(Dimension::Id::Y);
+            layout->registerDim(Dimension::Id::Z);
+            layout->registerDim(Dimension::Id::NormalX);
+            layout->registerDim(Dimension::Id::NormalY);
+            layout->registerDim(Dimension::Id::NormalZ);
+            layout->registerDim(Dimension::Id::Curvature);
+            layout->registerDim(Dimension::Id::ClusterID);
+
+            int count = 0;
+            PointViewPtr view(new PointView(rd->table));
+            for (int j = 0; j < input->size(); j++) {
+
+                size_t clusterID = input->getFieldAs<double>(Dimension::Id::ClusterID, j);
+                if (clusterID == (k + 1)) {
+
+
+                    double x = input->getFieldAs<double>(Dimension::Id::X, j);
+                    double y = input->getFieldAs<double>(Dimension::Id::Y, j);
+                    double z = input->getFieldAs<double>(Dimension::Id::Z, j);
+                    double nx = input->getFieldAs<double>(Dimension::Id::NormalX, j);
+                    double ny = input->getFieldAs<double>(Dimension::Id::NormalY, j);
+                    double nz = input->getFieldAs<double>(Dimension::Id::NormalZ, j);
+                    double curv = input->getFieldAs<double>(Dimension::Id::Curvature, j);
+
+
+                    view->setField(Dimension::Id::X, count, x);
+                    view->setField(Dimension::Id::Y, count, y);
+                    view->setField(Dimension::Id::Z, count, z);
+                    view->setField(Dimension::Id::NormalX, count, nx);
+                    view->setField(Dimension::Id::NormalY, count, ny);
+                    view->setField(Dimension::Id::NormalZ, count, nz);
+                    view->setField(Dimension::Id::Curvature, count, curv);
+                    view->setField(Dimension::Id::ClusterID, count, 0);
+
+                    count++;
+                }
+            }
+
+            rd->view.insert(view);
+            out.push_back(move(rd));
+
+        }
+    }
+    void cluster(const vector<RoofData*>& roof, float tolerance, size_t min_points) {
+
+
+        vector<thread> threads;
+
+        Options opts;
+        opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
+        opts.add("min_points", min_points);                    //minimum number of points in a cluster
+        for (int i = 0; i < roof.size(); ++i) {
+            threads.emplace_back(&PointReader::worker, this, (int)i, opts, cref(roof));
+        }
+
+
+        for (auto& t : threads) {
+            t.join(); // wait for all threads to finish
+        }
+    }
+    void worker(int id, Options opts, const std::vector<RoofData*>& roof) {
+        Stage* stage = factory.createStage("filters.cluster");
+        auto& rd = *roof[id];
+        BufferReader reader;
+        reader.addView(*rd.view.begin());
+
+        stage->setOptions(opts);
+        stage->setInput(reader);
+        stage->prepare(rd.table);
+        stage->execute(rd.table);
+
+
+        //std::cout << "Hello from thread " << id << "\n";
+    }
+    size_t printCloud(const PointViewSet& pvs, const string& filePath) {
+
+        ofstream out(filePath);
+        out.setf(ios::fixed);
+        out << setprecision(2);
+
+        
+        size_t written = 0;
+
+        for (const PointViewPtr& view : pvs)
+        {
+            if (!view) continue;
+
+            for (PointId i = 0; i < view->size(); ++i)
+            {
+                // PDAL standard coordinate dimensions:
+                const double x = view->getFieldAs<double>(pdal::Dimension::Id::X, i);
+                const double y = view->getFieldAs<double>(pdal::Dimension::Id::Y, i);
+                const double z = view->getFieldAs<double>(pdal::Dimension::Id::Z, i);
+                out << x << "," << y << "," << z << "\n";
+                ++written;
+            }
+        }
+
+        return written;
+    }
+    BestFitPlane countPlane(vector<Vector3d> points) {
+        BestFitPlane plane;
+
+        //centroid
+        double sumx = 0;
+        double sumy = 0;
+        double sumz = 0;;
+        for (int i = 0; i < points.size(); i++) {
+            sumx += points[i].x();
+            sumy += points[i].y();
+            sumz += points[i].z();
+        }
+        plane.centroid = Vector3d(sumx / points.size(), sumy / points.size(), sumz / points.size());
+
+
+        //centered points
+        vector<Vector3d> centeredPoints;
+        for (int i = 0; i < points.size(); i++) {
+            centeredPoints.push_back(points[i] - plane.centroid);
+        }
+
+        //covariance matrix
+        Matrix3d cov = Matrix3d::Zero();
+        const int N = static_cast<int>(centeredPoints.size());
+        for (const auto& p : centeredPoints) {
+            cov.noalias() += p * p.transpose(); // outer product
+        }
+
+
+        //normal
+        SelfAdjointEigenSolver<Matrix3d> solver(cov);
+        Vector3d normal = solver.eigenvectors().col(0);
+        plane.normal = normal.normalized();
+
+
+        //d
+        plane.d = -plane.normal.dot(plane.centroid);
+
+
+        return plane;
+    }
+    
+        //meshes
+    MeshReadyView makeMeshReadyViewDeep(const pdal::PointViewPtr& src)
+    {
+        using namespace pdal;
+
+        MeshReadyView out;
+        out.table = std::make_shared<PointTable>();
+        auto layout = out.table->layout();
+
+        auto keep = [&](Dimension::Id id)
+            {
+                if (src->layout()->hasDim(id))
+                    layout->registerDim(id);
+            };
+
+        keep(Dimension::Id::X);
+        keep(Dimension::Id::Y);
+        keep(Dimension::Id::Z);
+        keep(Dimension::Id::NormalX);
+        keep(Dimension::Id::NormalY);
+        keep(Dimension::Id::NormalZ);
+        keep(Dimension::Id::Curvature);
+
+        out.view.reset(new PointView(*out.table));
+
+        for (pdal::PointId i = 0; i < src->size(); ++i)
+        {
+            pdal::PointId id = out.view->size();
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::X))
+                out.view->setField(pdal::Dimension::Id::X, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::X, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Y))
+                out.view->setField(pdal::Dimension::Id::Y, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Y, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Z))
+                out.view->setField(pdal::Dimension::Id::Z, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Z, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalX))
+                out.view->setField(pdal::Dimension::Id::NormalX, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalX, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalY))
+                out.view->setField(pdal::Dimension::Id::NormalY, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalY, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::NormalZ))
+                out.view->setField(pdal::Dimension::Id::NormalZ, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::NormalZ, i));
+
+            if (src->layout()->hasDim(pdal::Dimension::Id::Curvature))
+                out.view->setField(pdal::Dimension::Id::Curvature, id,
+                    src->getFieldAs<double>(pdal::Dimension::Id::Curvature, i));
+        }
+
+        return out;
+    }
+    MeshReadyView buildDelaunayMesh(MeshReadyView data)
+    {
+        BufferReader reader;
+        reader.addView(data.view);
+
+        DelaunayFilter filter;
+        filter.setInput(reader);
+        filter.prepare(*data.table);
+        PointViewSet outViews = filter.execute(*data.table);
+
+
+        data.view = *outViews.begin();
+        return data;
+    }
+    void writeMeshToPly(const MeshReadyView& data, const string& filename)
+    {
+        BufferReader reader;
+        reader.addView(data.view);
+
+        PlyWriter writer;
+        writer.setInput(reader);
+
+        Options wopts;
+        wopts.add("filename", filename);
+        wopts.add("faces", true);
+        wopts.add("storage_mode", "little endian");
+        writer.setOptions(wopts);
+
+        writer.prepare(*data.table);
+        writer.execute(*data.table);
+    }
+    double distanceBetweenPoints(double x1, double y1, double x2, double y2) {
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        return sqrt(dx * dx + dy * dy);
+    }
+    TriangularMesh cutMesh(PointViewPtr view, TriangularMesh* mesh, double alpha) {
+
+
+
+        TriangularMesh outMesh;
+        cout << "mesh->size() " << mesh->size() << endl;
+        for (const Triangle& t : *mesh)
+        {
+            PointId a = t.m_a, b = t.m_b, c = t.m_c;
+            double ax = view->getFieldAs<double>(Dimension::Id::X, a);
+            double ay = view->getFieldAs<double>(Dimension::Id::Y, a);
+            double az = view->getFieldAs<double>(Dimension::Id::Z, a);
+
+            double bx = view->getFieldAs<double>(Dimension::Id::X, b);
+            double by = view->getFieldAs<double>(Dimension::Id::Y, b);
+            double bz = view->getFieldAs<double>(Dimension::Id::Z, b);
+
+            double cx = view->getFieldAs<double>(Dimension::Id::X, c);
+            double cy = view->getFieldAs<double>(Dimension::Id::Y, c);
+            double cz = view->getFieldAs<double>(Dimension::Id::Z, c);
+
+
+            double da = distanceBetweenPoints(ax, ay, bx, by);
+            double db = distanceBetweenPoints(bx, by, cx, cy);
+            double dc = distanceBetweenPoints(cx, cy, ax, ay);
+
+            double s = (da + db + dc) / 2.0;
+            double area = sqrt(s * (s - da) * (s - db) * (s - dc));
+            double R = (da * db * dc) / (4.0 * area); // circumradius
+
+            // Example policy: keep triangle only if ALL 3 vertices pass
+            if (R < alpha)
+            {
+                outMesh.add(a, b, c);
+            }
+        }
+        return outMesh;
+
+    }
+    void attachTriangularMesh(PointViewPtr view, TriangularMesh mesh)
+    {
+        TriangularMesh* dst = view->createMesh("");
+        *dst = std::move(mesh);
+        cout << "reduced mesh size " << dst->size() << endl;
+    }
+    vector<int> hollowMesh(PointViewPtr view, TriangularMesh mesh) {
+
+        vector<mEdge> allEdges;
+        for (const Triangle& t : mesh) {
+
+            PointId a = t.m_a, b = t.m_b, c = t.m_c;
+
+            mEdge e1(a < b ? a : b, a < b ? b : a);
+            mEdge e2(b < c ? b : c, b < c ? c : b);
+            mEdge e3(a < c ? a : c, a < c ? c : a);
+            allEdges.push_back(e1);
+            allEdges.push_back(e2);
+            allEdges.push_back(e3);
+        }
+
+        map<mEdge, int> freq;
+
+        for (const mEdge& e : allEdges) {
+            freq[e]++;
+        }
+
+
+        vector<mEdge> borderEdges;
+        for (const mEdge& e : allEdges) {
+            if (freq[e] == 1) {
+                borderEdges.push_back(e);
+            }
+        }
+
+        vector<int> vertices;
+        for (const mEdge& e : borderEdges) {
+            vertices.push_back(e.id1);
+            vertices.push_back(e.id2);
+        }
+
+        vector<int> uniqueVertices;
+        for (int x : vertices) {
+            if (find(uniqueVertices.begin(), uniqueVertices.end(), x) == uniqueVertices.end()) {
+                uniqueVertices.push_back(x);
+            }
+        }
+
+
+        return uniqueVertices;
+    }
+
+        //jackets
+    vector<Vector3d> createJacket(PointViewPtr inputView, vector<int> vertices) {
+
+        vector<Vector3d> points;
+        for (int i = 0; i < vertices.size(); i++) {
+            double x = inputView->getFieldAs<double>(pdal::Dimension::Id::X, vertices[i]);
+            double y = inputView->getFieldAs<double>(pdal::Dimension::Id::Y, vertices[i]);
+            double z = inputView->getFieldAs<double>(pdal::Dimension::Id::Z, vertices[i]);
+            Vector3d point(x, y, z);
+            points.push_back(point);
+        }
+        return points;
+    }
+    double distanceToLine(const Line3D& line, const Vector3d& point)
     {
         double dirLen = line.dir.norm();
         if (dirLen == 0.0)
             throw std::runtime_error("Line direction is zero.");
 
         return (point - line.p).cross(line.dir).norm() / dirLen;
+    }
+    void leastSquares(const vector<Vector3d>& points, Line3D& line) {
+        int n = static_cast<int>(points.size());
+        if (n == 0)
+            throw std::runtime_error("No points.");
+
+        // 1. centroid
+        line.p.setZero();
+        for (const auto& p : points)
+            line.p += p;
+        line.p /= static_cast<double>(n);
+
+        // 2. covariance-like matrix
+        Matrix3d S = Matrix3d::Zero();
+        for (const auto& p : points)
+        {
+            Vector3d d = p - line.p;
+            S += d * d.transpose();
+        }
+
+        // 3. dominant eigenvector by power iteration
+        Vector3d v(1.0, 1.0, 1.0);
+        v.normalize();
+
+        for (int i = 0; i < 100; ++i)
+        {
+            v = S * v;              // matrix * vector
+            if (v.norm() == 0.0)    // safety check
+                break;
+            v.normalize();          // normalize in place
+        }
+
+        line.dir = v;
+    }
+    vector<Vector3d> findEdgePoints(string folder, vector<Vector3d> all_points, double ratio, double points_lower_limit, double points_upper_limit, bool& stop) {
+        for (int i = 0; i < all_points.size(); i++) {
+            for (int j = i + 1; j < all_points.size(); j++) {
+
+
+
+                //first round
+                size_t points_count = 0;
+                vector<Vector3d> line_points;
+                Line3D line;
+                line.p = all_points[i];
+                line.dir = all_points[j] - all_points[i];
+                for (int k = 0; k < all_points.size(); k++) {
+                    if (k != i && k != j) {
+
+                        Vector3d C = all_points[k];
+                        double d = distanceToLine(line, C);
+                        if (d < ratio) {
+                            line_points.push_back(C);
+                            points_count++;
+                        }
+                    }
+                }
+                line_points.push_back(all_points[i]);
+                line_points.push_back(all_points[j]);
+                points_count++;
+                points_count++;
+
+
+                ////second round - better line fit
+                if (points_count > points_lower_limit) {
+
+                    points_count = 0;
+                    leastSquares(line_points, line);
+                    line_points.clear();
+                    for (int k = 0; k < all_points.size(); k++) {
+                        if (k != i && k != j) {
+
+
+                            Vector3d C = all_points[k];
+                            double d = distanceToLine(line, C);
+                            if (d < ratio) {
+                                line_points.push_back(C);
+                                points_count++;
+
+                            }
+                        }
+                    }
+                    if (points_count > points_upper_limit) {
+                        line_points.push_back(all_points[i]);
+                        line_points.push_back(all_points[j]);
+
+                        ofstream out(folder);
+                        out << std::fixed << std::setprecision(8);
+                        out << line.p.x() << "," << line.p.y() << "," << line.p.z() << "\n";
+                        out << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << "\n";
+                        out << '\n';
+
+                        return line_points;
+                    }
+                }
+
+
+
+            }
+        }
+
+        stop = true;
+        return all_points;
+    }
+    void findCornerPoints(vector<Vector3d> points, Vector3d& p1, Vector3d& p2) {
+        double bestDist2 = -1.0;
+
+        for (size_t i = 0; i < points.size(); i++) {
+            for (size_t j = i + 1; j < points.size(); j++) {
+                double dist2 = (points[i] - points[j]).squaredNorm();
+
+                if (dist2 > bestDist2) {
+                    bestDist2 = dist2;
+                    p1 = points[i];
+                    p2 = points[j];
+                }
+            }
+        }
+    }
+
+        //planes
+    bool intersectPlanes(const BestFitPlane& p1, const BestFitPlane& p2, Line3D& out, double eps = 1e-12)
+    {
+        Vector3d u = p1.normal.cross(p2.normal);
+        double denom = u.squaredNorm();
+
+        if (denom < eps) {
+            // Planes are parallel (or nearly). Could be distinct or the same plane.
+            return false;
+        }
+
+        // Point on intersection line:
+        Vector3d p0 = ((p2.d * p1.normal - p1.d * p2.normal).cross(u)) / denom;
+
+        out.p = p0;
+        out.dir = u; // you can normalize if you want: u.normalized()
+        return true;
+    }
+    bool neighbors(vector<Vector3d> one, vector<Vector3d> two, double ratio) {
+		//ratio is the maximum distance between points of two lines to be considered neighbors (and thus intersecting)
+
+        for (int i = 0; i < one.size(); i++)
+        {
+            for (int j = 0; j < two.size(); j++)
+            {
+                double distance = (one[i] - two[j]).norm();
+                if (distance < ratio) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
 
@@ -539,7 +1061,7 @@ public:
     }
  
 
-
+        //ROOFS CLUSTERING
     void makePointViewSetRoofs() {
         PointViewPtr old_view = *buildpoint.begin();
         cout << "Making pointViewSet   roofs " << endl;
@@ -597,9 +1119,140 @@ public:
         }
 
     }
+    void modifySubroofs() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            PointViewPtr subroof = *roofs[i].roof->view.begin();
+            auto rd = std::make_unique<RoofData>();
+            PointLayoutPtr layout = rd->table.layout();
+
+            layout->registerDim(Dimension::Id::X);
+            layout->registerDim(Dimension::Id::Y);
+            layout->registerDim(Dimension::Id::Z);
+            layout->registerDim(Dimension::Id::Curvature);
+            layout->registerDim(Dimension::Id::ClusterID);
+
+            PointViewPtr view(new PointView(rd->table));
+            for (int j = 0; j < subroof->size(); j++) {
+
+                double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, j);
+                double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, j);
+                double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, j);
+
+                view->setField(Dimension::Id::X, j, nx);
+                view->setField(Dimension::Id::Y, j, ny);
+                view->setField(Dimension::Id::Z, j, nz);
+            }
+
+            rd->view.insert(view);
+            roofs[i].msubroof = move(rd);
+        }
+    }
+    void clusterByNormals(float tolerance, size_t min_points) {
+        cout << "Normal clustering begins " << endl;
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            cout << "clustering roof " << i << endl;
+            vector<RoofData*> tt;
+            tt.push_back(roofs[i].msubroof.get());
+            cluster(tt, tolerance, min_points);
+        }
+    }
+    void finalizeSubroofs() {
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            PointViewPtr msubroof = *roofs[i].msubroof->view.begin();
+            PointViewPtr subroof = *roofs[i].roof->view.begin();
+
+            //getting number of clusters
+            unordered_set<double> clusterIDs = getRoofsIDs(msubroof);
+            double numClusters = clusterIDs.size();
+
+            for (int l = 0; l < numClusters; l++) {
+
+                auto rd = std::make_unique<RoofData>();
+                PointLayoutPtr layout = rd->table.layout();
+                layout->registerDim(Dimension::Id::X);
+                layout->registerDim(Dimension::Id::Y);
+                layout->registerDim(Dimension::Id::Z);
+                layout->registerDim(Dimension::Id::NormalX);
+                layout->registerDim(Dimension::Id::NormalY);
+                layout->registerDim(Dimension::Id::NormalZ);
+                layout->registerDim(Dimension::Id::Curvature);
+                layout->registerDim(Dimension::Id::ClusterID);
+                PointViewPtr view(new PointView(rd->table));
+
+
+                int count = 0;
+                for (int m = 0; m < msubroof->size(); m++) {
+
+
+                    size_t clusterID = msubroof->getFieldAs<double>(Dimension::Id::ClusterID, m);
+                    if (clusterID == (l + 1)) {
+
+                        double x = subroof->getFieldAs<double>(Dimension::Id::X, m);
+                        double y = subroof->getFieldAs<double>(Dimension::Id::Y, m);
+                        double z = subroof->getFieldAs<double>(Dimension::Id::Z, m);
+                        double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, m);
+                        double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, m);
+                        double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, m);
+                        double curv = subroof->getFieldAs<double>(Dimension::Id::Curvature, m);
+
+                        view->setField(Dimension::Id::X, count, x);
+                        view->setField(Dimension::Id::Y, count, y);
+                        view->setField(Dimension::Id::Z, count, z);
+                        view->setField(Dimension::Id::NormalX, count, nx);
+                        view->setField(Dimension::Id::NormalY, count, ny);
+                        view->setField(Dimension::Id::NormalZ, count, nz);
+                        view->setField(Dimension::Id::Curvature, count, curv);
+                        view->setField(Dimension::Id::ClusterID, count, 0);
+                        count++;
+                    }
+                }
+                rd->view.insert(view);
+                roofs[i].nsubroof.push_back(move(rd));
+            }
+
+        }
 
 
 
+        for (int i = 0; i < roofs.size(); i++) {
+            cout << "normal clustered roof " << i + 1 << " contains \t" << roofs[i].nsubroof.size() << " subroofs " << endl;
+        }
+
+
+
+    }
+    void clusterByPoints(float tolerance, size_t min_points) {
+        cout << "Point clustering begins" << endl;
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            vector<RoofData*> tt;
+            for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
+                tt.push_back(roofs[i].nsubroof[j].get());
+            }
+            cluster(tt, tolerance, min_points);
+
+        }
+    }
+    void endSubroofs() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+
+            for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
+
+                PointViewPtr input = *roofs[i].nsubroof[j]->view.begin();
+                createNewCloud(input, roofs[i].fsubroof);
+            }
+        }
+    }
 
 
     void printMainRoofs(const PointViewPtr& view, string out_file, string folder) {
@@ -641,626 +1294,200 @@ public:
             //debug
         cout << numClusters << " files have been created" << endl;
     }
+    void printRoofs(string out_file, string folder_name) {
 
-
-
-
-
-    using RoofVec = std::vector<std::unique_ptr<RoofData>>;
-
-
-    void createNewCloud(PointViewPtr input, RoofVec& out) {
-        //PointViewPtr input = *roofs[i].roof->view.begin();
-
-
-            //getting number of clusters
-        unordered_set<double> clusterIDs = getRoofsIDs(input);
-        double numClusters = clusterIDs.size();
-
-
-        for (int k = 0; k < numClusters; k++) {
-
-            auto rd = std::make_unique<RoofData>();
-            PointLayoutPtr layout = rd->table.layout();
-
-            layout->registerDim(Dimension::Id::X);
-            layout->registerDim(Dimension::Id::Y);
-            layout->registerDim(Dimension::Id::Z);
-            layout->registerDim(Dimension::Id::NormalX);
-            layout->registerDim(Dimension::Id::NormalY);
-            layout->registerDim(Dimension::Id::NormalZ);
-            layout->registerDim(Dimension::Id::Curvature);
-            layout->registerDim(Dimension::Id::ClusterID);
-
-            int count = 0;
-            PointViewPtr view(new PointView(rd->table));
-            for (int j = 0; j < input->size(); j++) {
-
-                size_t clusterID = input->getFieldAs<double>(Dimension::Id::ClusterID, j);
-                if (clusterID == (k + 1)) {
-
-
-                    double x = input->getFieldAs<double>(Dimension::Id::X, j);
-                    double y = input->getFieldAs<double>(Dimension::Id::Y, j);
-                    double z = input->getFieldAs<double>(Dimension::Id::Z, j);
-                    double nx = input->getFieldAs<double>(Dimension::Id::NormalX, j);
-                    double ny = input->getFieldAs<double>(Dimension::Id::NormalY, j);
-                    double nz = input->getFieldAs<double>(Dimension::Id::NormalZ, j);
-                    double curv = input->getFieldAs<double>(Dimension::Id::Curvature, j);
-
-
-                    view->setField(Dimension::Id::X, count, x);
-                    view->setField(Dimension::Id::Y, count, y);
-                    view->setField(Dimension::Id::Z, count, z);
-                    view->setField(Dimension::Id::NormalX, count, nx);
-                    view->setField(Dimension::Id::NormalY, count, ny);
-                    view->setField(Dimension::Id::NormalZ, count, nz);
-                    view->setField(Dimension::Id::Curvature, count, curv);
-                    view->setField(Dimension::Id::ClusterID, count, 0);
-
-                    count++;
-                }
-            }
-
-            rd->view.insert(view);
-            //roofs[i].subroof.push_back(move(rd));
-            out.push_back(move(rd));
-
-        }
-
-        //return rd;
-
-    }
-
-
-    void fillSubroofs() {
-
-
-        for (int i = 0; i < number_of_roofs; i++) {
-
-            PointViewPtr input = *roofs[i].roof->view.begin();
-            createNewCloud(input, roofs[i].subroof);
-        }
-
-        
-    }
-    void endSubroofs() {
-
-        for (int i = 0; i < number_of_roofs; i++) {
-
-            for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
-
-                PointViewPtr input = *roofs[i].nsubroof[j]->view.begin();
-                createNewCloud(input, roofs[i].fsubroof);
-            }
-
-        }
-
-    }
-
-    void modifySubroofs() {
-
-        for (int i = 0; i < number_of_roofs; i++) {
-
-
-            for (int k = 0; k < roofs[i].subroof.size(); k++) {
-                PointViewPtr subroof = *roofs[i].subroof[k]->view.begin();
-
-                auto rd = std::make_unique<RoofData>();
-                PointLayoutPtr layout = rd->table.layout();
-
-                layout->registerDim(Dimension::Id::X);
-                layout->registerDim(Dimension::Id::Y);
-                layout->registerDim(Dimension::Id::Z);
-                layout->registerDim(Dimension::Id::Curvature);
-                layout->registerDim(Dimension::Id::ClusterID);
-
-
-                PointViewPtr view(new PointView(rd->table));
-                for (int j = 0; j < subroof->size(); j++) {
-
-                    double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, j);
-                    double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, j);
-                    double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, j);
-
-                    view->setField(Dimension::Id::X, j, nx);
-                    view->setField(Dimension::Id::Y, j, ny);
-                    view->setField(Dimension::Id::Z, j, nz);
-                }
-
-                rd->view.insert(view);
-                roofs[i].msubroof.push_back(move(rd));
-
-            }
-
-            
-
-        }
-
-
-    }
-    void appointClusterID() {
-
-        /*for (int i = 0; i < roofs.size(); i++) {
-
-            for (int k = 0; k < roofs[i].subroof.size(); k++) {
-                
-                PointViewPtr view = *roofs[i].subroof[k]->view.begin();
-                *roofs[i].subroof[k]->view.begin()
-            }
-
-        }*/
-    }
-
-    void finalizeSubroofs() {
-
-        for (int i = 0; i < roofs.size(); i++) {
-
-            for (int k = 0; k < roofs[i].msubroof.size(); k++) {
-                
-                PointViewPtr msubroof = *roofs[i].msubroof[k]->view.begin();
-                PointViewPtr subroof = *roofs[i].subroof[k]->view.begin();
-
-                //getting number of clusters
-                unordered_set<double> clusterIDs = getRoofsIDs(msubroof);
-                double numClusters = clusterIDs.size();
-
-
-
-
-                for (int l = 0; l < numClusters; l++) {
-
-                    auto rd = std::make_unique<RoofData>();
-                    PointLayoutPtr layout = rd->table.layout();
-                    layout->registerDim(Dimension::Id::X);
-                    layout->registerDim(Dimension::Id::Y);
-                    layout->registerDim(Dimension::Id::Z);
-                    layout->registerDim(Dimension::Id::NormalX);
-                    layout->registerDim(Dimension::Id::NormalY);
-                    layout->registerDim(Dimension::Id::NormalZ);
-                    layout->registerDim(Dimension::Id::Curvature);
-                    layout->registerDim(Dimension::Id::ClusterID);
-                    PointViewPtr view(new PointView(rd->table));
-
-
-                    int count = 0;
-                    for (int m = 0; m < msubroof->size(); m++) {
-
-                        
-                        size_t clusterID = msubroof->getFieldAs<double>(Dimension::Id::ClusterID, m);
-                        if (clusterID == (l + 1)) {
-
-                            double x = subroof->getFieldAs<double>(Dimension::Id::X, m);
-                            double y = subroof->getFieldAs<double>(Dimension::Id::Y, m);
-                            double z = subroof->getFieldAs<double>(Dimension::Id::Z, m);
-                            double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, m);
-                            double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, m);
-                            double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, m);
-                            double curv = subroof->getFieldAs<double>(Dimension::Id::Curvature, m);
-
-
-
-                            view->setField(Dimension::Id::X, count, x);
-                            view->setField(Dimension::Id::Y, count, y);
-                            view->setField(Dimension::Id::Z, count, z);
-                            view->setField(Dimension::Id::NormalX, count, nx);
-                            view->setField(Dimension::Id::NormalY, count, ny);
-                            view->setField(Dimension::Id::NormalZ, count, nz);
-                            view->setField(Dimension::Id::Curvature, count, curv);
-                            view->setField(Dimension::Id::ClusterID, count, 0);
-                            count++;
-                        }
-                    }
-                    rd->view.insert(view);
-                    roofs[i].nsubroof.push_back(move(rd));
-
-
-                }
-
-                
-
-
-            }
-        }
-
-
-
-        for (int i = 0; i < roofs.size(); i++) {
-
-
-            cout << "oroof " << i + 1 << " contains " << roofs[i].subroof.size() << " subroofs " << endl;
-            cout << "froof " << i + 1 << " contains " << roofs[i].nsubroof.size() << " subroofs " << endl;
-            cout << " " << endl;
-
-        }
-
-
-
-    }
-
-    void clusterByPoints(string rooftype, float tolerance, size_t min_points) {
-
-
-
-        cout << "Point clustering begins" << endl;
-
-       
-        if (rooftype == "mainroofs") {
-            vector<RoofData*> tt;
-            for (int i = 0; i < roofs.size(); i++) {
-                tt.push_back(roofs[i].roof.get());
-            }
-            cluster(tt, tolerance, min_points);
-        }
-        else if (rooftype == "nroofs") {
-
-            for (int i = 0; i < roofs.size(); i++) {
-
-                vector<RoofData*> tt;
-                for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
-                    cout << "j  " << j << endl;
-                    tt.push_back(roofs[i].nsubroof[j].get());
-
-                }
-                cout << "DONE 1 " << endl;
-                cluster(tt, tolerance, min_points);
-                cout << "DONW 2 " << endl;
-            }
-
-        }
-
-        
-
-
-        //for (auto& r : roofs) {
-        //    if (r.roof) {
-        //        tt.push_back(r.roof.get());   // <-- NO move
-        //    }
-        //}
-
-        
-    }
-    void clusterByNormals(float tolerance, size_t min_points) {
-
-       
-        
-        cout << "Normal clustering begins " << endl;
-        for (int i = 0; i < roofs.size(); i++) {
-
-            cout << "clustering roof " << i << endl;
-            vector<RoofData*> tt;
-            for (int j = 0; j < roofs[i].msubroof.size(); j++) {
-                tt.push_back(roofs[i].msubroof[j].get());
-
-            }
-            cluster(tt, tolerance, min_points);
-
-        }
-     
-        
-
-    }
-    void cluster(const vector<RoofData*>& roof, float tolerance, size_t min_points) {
- 
-
-        vector<thread> threads;
-        
-        Options opts;
-        opts.add("tolerance", tolerance);                     //max distance point to be added to the cluster
-        opts.add("min_points", min_points);                    //minimum number of points in a cluster
-        for (int i = 0; i < roof.size(); ++i) {
-            //threads.emplace_back(worker, i, cluster, opts, roof); // starts immediately
-            threads.emplace_back(&PointReader::worker, this, (int)i, opts, std::cref(roof));
-        }
-
-
-        for (auto& t : threads) {
-            t.join(); // wait for all threads to finish
-        }
-    }
-    void worker(int id, Options opts, const std::vector<RoofData*>& roof) {
-        Stage* stage = factory.createStage("filters.cluster");
-        auto& rd = *roof[id];
-        BufferReader reader;
-        reader.addView(*rd.view.begin());
-
-        stage->setOptions(opts);
-        stage->setInput(reader);
-        stage->prepare(rd.table);
-        stage->execute(rd.table);
-
-
-        //std::cout << "Hello from thread " << id << "\n";
-    }
-
-    void makeClusteredRoofsFiles(string folder) {
-        std::error_code ec;
-
-        // Relative path: this is relative to the *current working directory*
-        filesystem::path dir = folder;
-
-        ec.clear();
-
-
-        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
-        if (ec) {
-            std::cerr << "remove_all failed: " << ec.message() << "\n";
-            return;
-        }
-        filesystem::create_directories(folder);
-
-        /*string folderName = "folderujem";
-        if (!filesystem::exists(folderName)) {
-            if (filesystem::create_directories(folderName)) {
-                std::cout << "Folder created: " << folderName << '\n';
-            }
-            else {
-                std::cout << "Failed to create folder\n";
-            }
-        }*/
-
-        cout << "whaat " << endl;
-
-
-        //std::error_code ec;
-        //if (filesystem::exists(folder, ec))
-        {
-            //filesystem::remove_all(folder, ec);   // recursive
-            //if (ec) throw filesystem::filesystem_error("remove_all failed", folder, ec);
-        }
-
-        
-        //filesystem::create_directories(folder, ec);
-        //if (ec) throw filesystem::filesystem_error("create_directories failed", folder, ec);
-
-
-
-        /*filesystem::path path = folder;
-        for (const auto& entry : filesystem::directory_iterator(path)) {
-            if (!filesystem::is_regular_file(entry.status()))
-                filesystem::remove(entry.path());
-
-            if (entry.path().extension() == ".txt") {
-                filesystem::remove(entry.path());
-            }
-        }*/
-
-
-
-        size_t count = 1;
-        for (int i = 0; i < roofs.size(); i++) {
-            string folderName = folder + "/roof" + to_string(count);
-            cout << "roof " << to_string(count);
-
-            auto& rd = *roofs[i].roof;
-            PointViewPtr ff = *rd.view.begin();
-            cout << " cluster size  " << ff->size() << endl;
-
-            if (ff->size() != 0) {
-                //makeClusteredFiles(*rd.view.begin(), folderName);
-                count++;
-            }
-
-            
-
-        }
-
-
-
-
-
-
-    }
-    
-    void printFinalRoofs(string folder) {
-
-
-
-
+        string path = out_file + "/" + folder_name;
         error_code ec;
-        filesystem::path dir = folder;
+        filesystem::path dir = path;
         ec.clear();
+        filesystem::create_directories(dir);
 
-        filesystem::create_directories(folder);
-        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
-        if (ec) {
-            std::cerr << "remove_all failed: " << ec.message() << "\n";
-            return;
-        }
-        filesystem::create_directories(folder);
-        cout << "done " << endl;
-
-
-
+  
         for (int i = 0; i < roofs.size(); i++) {
 
-            string path = folder + "/roof" + to_string(i + 1);
- 
+            string fileName = path + "/roof" + to_string(i + 1);
+            filesystem::create_directories(fileName);
+
+            if (folder_name == "normalRoofs") {
+
+                for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
+
+                    string lastname = fileName + "/subroof" + to_string(j + 1) + ".txt";
+                    size_t n = printCloud(roofs[i].nsubroof[j]->view, lastname);
+                    cout << "roof " << i + 1 << " subroof " << j + 1 << " ----- " << n << endl;
+                }
+                cout << " " << endl;
+            }
+            else if (folder_name == "finalRoofs") {
+
+                for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                    string lastname = fileName + "/subroof" + to_string(j + 1) + ".txt";
+                    size_t n = printCloud(roofs[i].fsubroof[j]->view, lastname);
+                    cout << "roof " << i + 1 << " finalroof " << j + 1 << " ----- " << n << endl;
+                }
+                cout << " " << endl;
+
+
+            }
+
+            
+        }
+    }
+    void printCentroids(string out_file, string foldername) {
+        string mainpath = out_file + "/" + foldername;
+        filesystem::create_directories(mainpath);
+
+        for (int i = 0; i < roofs.size(); i++)
+        {
+            string path = mainpath + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path);
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++)
+            {
+                Vector3d centroid = roofs[i].fsubroof[j]->centroid;
+
+                string fileName = path + "/centroid" + to_string(j + 1) + ".txt";
+                ofstream out(fileName);
+                out << fixed << std::setprecision(3);
+                out << centroid.x() << "," << centroid.y() << "," << centroid.z() << endl;
+            }
+        }
+
+    }
+    void printPlanes(string out_file, string folder_name) {
+        string mainpath = out_file + "/" + folder_name;
+        filesystem::create_directories(mainpath);
+  
+        for (int i = 0; i < roofs.size(); i++) {
+
+            string path = mainpath + "/roof" + to_string(i + 1);
             filesystem::create_directories(path);
 
-            for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
+            
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
-                string fileName = path + "/subroof" + to_string(j + 1) + ".txt";
-                size_t n = printCloud(roofs[i].nsubroof[j]->view, fileName);
-                cout << "roof " << i << "subroof " << j << " ----- " << n << endl;
-
-                /*PointViewPtr inputView = *roofs[i].fsubroof[j]->view.begin();
-                std::cerr
-                    << "has X=" << inputView->hasDim(pdal::Dimension::Id::X)
-                    << " Y=" << inputView->hasDim(pdal::Dimension::Id::Y)
-                    << " Z=" << inputView->hasDim(pdal::Dimension::Id::Z)
-                    << "\n";
-                double x = inputView->getFieldAs<double>(Dimension::Id::X, 0);
-                double y = inputView->getFieldAs<double>(Dimension::Id::Y, 0);
-                double z = inputView->getFieldAs<double>(Dimension::Id::Z, 0);
-                cout << "x " << x << " " << y << " " << z << endl;
+                string finalpath = path + "/plane" + to_string(j + 1) + ".txt";
 
 
-                cout << "1 " << endl;
-                BufferReader reader;
-                reader.addView(inputView);
-                
+                ofstream out(finalpath);
+  
+                out.setf(ios::fixed);
+                out << setprecision(7);
 
-                string name = path + "/roof" + to_string(j + 1);
-                writeToTextFile(reader, name);*/
-
+                const double x = roofs[i].plane[j].normal.x();
+                const double y = roofs[i].plane[j].normal.y();
+                const double z = roofs[i].plane[j].normal.z();
+                const double d = roofs[i].plane[j].d;
+                out << x << "," << y << "," << z << "," << d << "\n";
             }
-
         }
     }
-
-    void printFinalRoofs22(string folder) {
-
-
-
-
-        error_code ec;
-        filesystem::path dir = folder;
-        ec.clear();
-
-        filesystem::create_directories(folder);
-        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
-        if (ec) {
-            std::cerr << "remove_all failed: " << ec.message() << "\n";
-            return;
-        }
-        filesystem::create_directories(folder);
-        cout << "done " << endl;
-
-
+    void printMeshes(string out_file, string folder_name) {
+        string mainpath = out_file + "/" + folder_name;
+        filesystem::create_directories(mainpath);
 
         for (int i = 0; i < roofs.size(); i++) {
 
-            string path = folder + "/roof" + to_string(i + 1);
+            string path = mainpath + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path);
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
+                auto clean = roofs[i].mesh_ready_view[j];
+                string name = path + "/subroof" + to_string(j + 1) + "mesh.ply";
+
+                writeMeshToPly(clean, name);
+            }
+        }
+    }
+    void printJackets(string out_file, string folder_name) {
+        string mainpath = out_file + "/" + folder_name;
+        filesystem::create_directories(mainpath);
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+            string path = mainpath + "/roof" + to_string(i + 1);
             filesystem::create_directories(path);
 
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-                string fileName = path + "/subroof" + to_string(j + 1) + ".txt";
-                size_t n = printCloud(roofs[i].fsubroof[j]->view, fileName);
-                cout << "roof " << i << "subroof " << j << " ----- " << n << endl;
-
-                /*PointViewPtr inputView = *roofs[i].fsubroof[j]->view.begin();
-                std::cerr
-                    << "has X=" << inputView->hasDim(pdal::Dimension::Id::X)
-                    << " Y=" << inputView->hasDim(pdal::Dimension::Id::Y)
-                    << " Z=" << inputView->hasDim(pdal::Dimension::Id::Z)
-                    << "\n";
-                double x = inputView->getFieldAs<double>(Dimension::Id::X, 0);
-                double y = inputView->getFieldAs<double>(Dimension::Id::Y, 0);
-                double z = inputView->getFieldAs<double>(Dimension::Id::Z, 0);
-                cout << "x " << x << " " << y << " " << z << endl;
-
-
-                cout << "1 " << endl;
-                BufferReader reader;
-                reader.addView(inputView);
-
-
-                string name = path + "/roof" + to_string(j + 1);
-                writeToTextFile(reader, name);*/
-
+                string fileName = path + "/jacket" + to_string(j + 1) + ".txt";
+                printJacketPoints(roofs[i].jacket[j], fileName);
             }
+        }
+    }
+    void printJacketPoints(vector<Vector3d> input, string filename) {
+        ofstream out(filename);
+        out << fixed << setprecision(2);
 
+        for (size_t i = 0; i < input.size(); ++i) {
+            double ax = input[i].x();
+            double ay = input[i].y();
+            double az = input[i].z();
+            out << ax << "," << ay << "," << az << "\n";
+        }
+        out << '\n';
+    }
+    void printLines(string out_file, string folder_name) {
+        string mainpath = out_file + "/" + folder_name;
+        filesystem::create_directories(mainpath);
+
+
+        for (int i = 0; i < roofs.size(); i++) {
+            string path = mainpath + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path);
+
+            for (int j = 0; j < roofs[i].lines.size(); j++) {
+                string fileName = path + "/line" + to_string(j + 1) + ".txt";
+                Line3D line = roofs[i].lines[j];
+                ofstream out(fileName);
+                out << std::fixed << std::setprecision(8);
+
+                out << line.p.x() << "," << line.p.y() << "," << line.p.z() << "\n";
+                out << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << "\n";
+                out << '\n';
+            }
         }
     }
 
 
 
-    size_t printCloud(const PointViewSet& pvs, const string& filePath) {
+    void calculateCentroid() {
+        auto start = chrono::high_resolution_clock::now();
+        cout << "BEGINNING centroid CALCULATING " << endl;
 
-        std::ofstream out(filePath);
-        //if (!out.is_open())
-          //  throw std::runtime_error("Failed to open output file: " + filePath);
-
- 
-        out.setf(std::ios::fixed);
-        out << std::setprecision(2);
-
- 
-        size_t written = 0;
-
-        for (const PointViewPtr& view : pvs)
+        for (int i = 0; i < roofs.size(); i++)
         {
-            if (!view) continue;
-
-            for (PointId i = 0; i < view->size(); ++i)
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++)
             {
-                // PDAL standard coordinate dimensions:
-                const double x = view->getFieldAs<double>(pdal::Dimension::Id::X, i);
-                const double y = view->getFieldAs<double>(pdal::Dimension::Id::Y, i);
-                const double z = view->getFieldAs<double>(pdal::Dimension::Id::Z, i);
-                out << x << "," << y << "," << z << "\n";
-                ++written;
+
+                double sumx = 0;
+                double sumy = 0;
+                double sumz = 0;
+                PointViewPtr view = *roofs[i].fsubroof[j]->view.begin();
+                for (int k = 0; k < view->size(); k++)
+                {
+
+                    const double x = view->getFieldAs<double>(Dimension::Id::X, k);
+                    const double y = view->getFieldAs<double>(Dimension::Id::Y, k);
+                    const double z = view->getFieldAs<double>(Dimension::Id::Z, k);
+                    sumx += x;
+                    sumy += y;
+                    sumz += z;
+                }
+                roofs[i].fsubroof[j]->centroid.x() = sumx / view->size();
+                roofs[i].fsubroof[j]->centroid.y() = sumy / view->size();
+                roofs[i].fsubroof[j]->centroid.z() = sumz / view->size();
             }
         }
 
-        return written;
-    }
-
-    BestFitPlane countPlane(vector<Eigen::Vector3d> points) {
-		BestFitPlane plane;
-
-
-            //centroid
-        double sumx = 0;
-        double sumy = 0; 
-        double sumz = 0;;
-        for (int i = 0; i < points.size(); i++) {
-            sumx += points[i].x();
-            sumy += points[i].y();
-            sumz += points[i].z();
-        }
-
-
-		plane.centroid = Eigen::Vector3d(sumx / points.size(), sumy / points.size(), sumz / points.size());
-
-		    //centered points
-		vector<Eigen::Vector3d> centeredPoints;
-        for (int i = 0; i < points.size(); i++) {
-			centeredPoints.push_back(points[i] - plane.centroid);
-        }
-
-
-
-		    //covariance matrix
-        Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
-        const int N = static_cast<int>(centeredPoints.size());
-        for (const auto& p : centeredPoints) {
-            cov.noalias() += p * p.transpose(); // outer product
-        }
-
-
-            //normal
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
-        Eigen::Vector3d normal = solver.eigenvectors().col(0);
-		
-        plane.normal = normal.normalized();
-
-       
-
-            //d
-		plane.d = -plane.normal.dot(plane.centroid);
-
-
-
-
-        
-
-
-
-		return plane;
+        chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
+        cout << "\n\nFINISHING centroid calculating in " << elapsedd.count() << " seconds.\n";
     }
     void computatePlanes() {
-
-
 
         for (int i = 0; i < roofs.size(); i++) {
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
                 PointViewPtr view = *roofs[i].fsubroof[j]->view.begin();
-
                 vector<Vector3d> points;
                 for (PointId id = 0; id < view->size(); ++id) {
                     double x = view->getFieldAs<double>(Dimension::Id::X, id);
@@ -1271,367 +1498,166 @@ public:
                 }
                 BestFitPlane plane = countPlane(points);
                 roofs[i].plane.push_back(plane);
-
-
-
             }
-
         }
-
-
-
-
     }
-    void printPlanes(string folder) {
-        error_code ec;
-        filesystem::path dir = folder;
-        ec.clear();
-
-        cout << "EJ " << endl;
-        filesystem::create_directories(folder);
-        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
-        if (ec) {
-            std::cerr << "remove_all failed: " << ec.message() << "\n";
-            return;
-        }
-        filesystem::create_directories(folder);
-        cout << "HAJ " << endl;
-
+    void computateMeshes() {
 
 
         for (int i = 0; i < roofs.size(); i++) {
-            string path = folder + "/roof" + to_string(i + 1);
-            cout << "LOOL " << endl;
-            filesystem::create_directories(path);
 
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
-                string fileName = path + "/plane" + to_string(j + 1) + ".txt";
-                
-                std::ofstream out(fileName);
-                //if (!out.is_open())
-                  //  throw std::runtime_error("Failed to open output file: " + filePath);
+                auto clean = makeMeshReadyViewDeep(*roofs[i].fsubroof[j]->view.begin());
+                clean = buildDelaunayMesh(clean);
 
-
-                out.setf(std::ios::fixed);
-                out << std::setprecision(7);
-
-                const double x = roofs[i].plane[j].normal.x();
-                const double y = roofs[i].plane[j].normal.y();
-                const double z = roofs[i].plane[j].normal.z();
-                const double d = roofs[i].plane[j].d;
-                out << x << "," << y << "," << z << "," << d << "\n";
-
-
+                roofs[i].mesh_ready_view.push_back(clean);
+                TriangularMesh* mesh = roofs[i].mesh_ready_view[j].view->mesh("");
+                roofs[i].initial_mesh.push_back(mesh);
             }
-
         }
 
     }
+    void alphaMeshClip(double alpha) {
 
-    double distanceBetweenPoints(double x1, double y1, double x2, double y2) {
-        double dx = x2 - x1;
-        double dy = y2 - y1;
-        return sqrt(dx * dx + dy * dy);
+        for (int i = 0; i < roofs.size(); i++) {
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                TriangularMesh nm = cutMesh(roofs[i].mesh_ready_view[j].view, roofs[i].initial_mesh[j], alpha);
+                attachTriangularMesh(roofs[i].mesh_ready_view[j].view, nm);
+                roofs[i].new_mesh.push_back(nm);
+            }
+        }
     }
+    void getJackets() {
+
+        for (int i = 0; i < roofs.size(); i++) {
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
+
+                TriangularMesh m = roofs[i].new_mesh[j];
+                vector<int> jacketIDs = hollowMesh(*roofs[i].fsubroof[j]->view.begin(), m);
+                roofs[i].jacket.push_back(createJacket(*roofs[i].fsubroof[j]->view.begin(), jacketIDs));
 
 
-    MeshReadyView buildDelaunayMesh(MeshReadyView data)
-    {
 
-        BufferReader reader;
-        reader.addView(data.view);
-
-        DelaunayFilter filter;
-        filter.setInput(reader);
-
-        filter.prepare(*data.table);
-        PointViewSet outViews = filter.execute(*data.table);
-
-        if (outViews.empty())
-            throw std::runtime_error("Delaunay returned no output view.");
-
-        data.view = *outViews.begin();
-        return data;
+                cout << "JACKET SIZE    " << roofs[i].jacket[j].size() << endl;
+            }
+        }
     }
-    void writeMeshToPly(const MeshReadyView& data, const string& filename)
-    {
+    void modifyJackets(string out_file) {
+        string mainpath1 = out_file + "/withoutEdges";
+        string mainpath2 = out_file + "/unitedPoints";
+        string mainpath3 = out_file + "/leastSquaredLines";
+        filesystem::create_directories(mainpath1);
+        filesystem::create_directories(mainpath2); 
+        filesystem::create_directories(mainpath3);
 
-        BufferReader reader;
-        reader.addView(data.view);
+        for (int i = 0; i < roofs.size(); i++) {
+            string path1 = mainpath1 + "/roof" + to_string(i + 1);
+            string path2 = mainpath2 + "/roof" + to_string(i + 1);
+            string path3 = mainpath3 + "/roof" + to_string(i + 1);
+            filesystem::create_directories(path1);
+            filesystem::create_directories(path2);
+            filesystem::create_directories(path3);
 
-        PlyWriter writer;
-        writer.setInput(reader);
+            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
-        Options wopts;
-        wopts.add("filename", filename);
-        wopts.add("faces", true);
-        wopts.add("storage_mode", "little endian");
-        writer.setOptions(wopts);
+                vector<Vector3d> jacket = roofs[i].jacket[j];
+                Vector3d centroid = roofs[i].fsubroof[j]->centroid;
 
 
+				string fp = path3 + "/jacket" + to_string(j + 1);
+                filesystem::create_directories(fp);
 
-        cout << "wr " << endl;
-        writer.prepare(*data.table);
-        writer.execute(*data.table);
+                jacket = findStraightEdges(fp, jacket);
+                string fileName = path1 + "/jacket" + to_string(j + 1) + ".txt";
+                printJacketPoints(jacket, fileName);
 
-        //PointTableRef table = view->table();
+                jacket = uniteClosePoints(jacket, 2.);
+                fileName = path2 + "/jacket" + to_string(j + 1) + ".txt";
+                printJacketPoints(jacket, fileName);
 
-        //BufferReader reader;
-        //reader.addView(view);
-
-        //PlyWriter writer;
-        //writer.setInput(reader);
-
-        //Options wopts;
-        //wopts.add("filename", filename);
-        //wopts.add("faces", true);                 // write triangle faces
-        //wopts.add("storage_mode", "little endian"); // binary PLY (keeps precision)
-        //writer.setOptions(wopts);
-
-        //cout << "-1 "  << endl;
-        //writer.prepare(table);
-
-        //writer.execute(table);
-        //cout << "-3 " << endl;  
+                jacket = orderPoints(jacket, centroid);
+                roofs[i].jacket[j] = jacket;
+            }
+        }
+    }
     
-    }
 
 
 
-    TriangularMesh cutMesh(PointViewPtr view, TriangularMesh* mesh, double alpha) {
-
-      
-
-        TriangularMesh outMesh;
-        cout << "mesh->size() " << mesh->size() << endl;
-        for (const Triangle& t : *mesh)
-        {
-            PointId a = t.m_a, b = t.m_b, c = t.m_c;
-
-
-            double ax = view->getFieldAs<double>(Dimension::Id::X, a);
-            double ay = view->getFieldAs<double>(Dimension::Id::Y, a);
-            double az = view->getFieldAs<double>(Dimension::Id::Z, a);
-
-            double bx = view->getFieldAs<double>(Dimension::Id::X, b);
-            double by = view->getFieldAs<double>(Dimension::Id::Y, b);
-            double bz = view->getFieldAs<double>(Dimension::Id::Z, b);
-
-            double cx = view->getFieldAs<double>(Dimension::Id::X, c);
-            double cy = view->getFieldAs<double>(Dimension::Id::Y, c);
-            double cz = view->getFieldAs<double>(Dimension::Id::Z, c);
-
-
-            double da = distanceBetweenPoints(ax, ay, bx, by);
-            double db = distanceBetweenPoints(bx, by, cx, cy);
-            double dc = distanceBetweenPoints(cx, cy, ax, ay);
-
-
-            double s = (da + db + dc) / 2.0;
-            double area = sqrt(s * (s - da) * (s - db) * (s - dc));
-			double R = (da * db * dc) / (4.0 * area); // circumradius
-
-
-            // Example policy: keep triangle only if ALL 3 vertices pass
-            if (R < alpha)
-            {
-                outMesh.add(a, b, c);
-            }
-
-            
-            
-        }
-        return outMesh;
-
-    }
-
-    void keep_only_values_with_freq_at_most_4(std::vector<int>& v) {
-
-		int limit = 3;
-        std::unordered_map<int, int> cnt;
-        for (int x : v) cnt[x]++;
-
-        v.erase(std::remove_if(v.begin(), v.end(),
-            [&](int x) { return cnt[x] > limit; }),
-            v.end());
-    }
-    void remove_repeats_sorted(std::vector<int>& v) {
-        std::sort(v.begin(), v.end());
-        v.erase(std::unique(v.begin(), v.end()), v.end());
-    }
-
-
-
-    vector<int> hollowMesh(PointViewPtr view, TriangularMesh mesh) {
-
-        vector<mEdge> allEdges;
-        for (const Triangle& t : mesh) {
-
-            PointId a = t.m_a, b = t.m_b, c = t.m_c;
-
-            mEdge e1(a < b ? a : b, a < b ? b : a);
-			mEdge e2(b < c ? b : c, b < c ? c : b);
-			mEdge e3(a < c ? a : c, a < c ? c : a);
-			allEdges.push_back(e1);
-			allEdges.push_back(e2);
-			allEdges.push_back(e3);
-        }
-        
-        map<mEdge, int> freq;
-
-        for (const mEdge& e : allEdges) {
-            freq[e]++;
-        }
-
-
-		vector<mEdge> borderEdges;
-        for (const mEdge& e : allEdges ) {
-            if (freq[e] == 1) {
-				borderEdges.push_back(e);
-            }
-        }
-
-        vector<int> vertices;
-        for (const mEdge& e : borderEdges) {
-            vertices.push_back(e.id1);
-            vertices.push_back(e.id2);
-        }
-
-        vector<int> uniqueVertices;
-        for (int x : vertices) {
-            if (find(uniqueVertices.begin(), uniqueVertices.end(), x) == uniqueVertices.end()) {
-                uniqueVertices.push_back(x);
-            }
-        }
-
- 
-        return uniqueVertices;
-    }
-    vector<Vector3d> createJacket(PointViewPtr inputView, vector<int> vertices) {
-
-       /* pdal::PointTable table;
-        table.layout()->registerDim(pdal::Dimension::Id::X);
-        table.layout()->registerDim(pdal::Dimension::Id::Y);
-        table.layout()->registerDim(pdal::Dimension::Id::Z);
-        pdal::PointViewPtr view(new pdal::PointView(table));*/
-
-		vector<Vector3d> points;
-        for (int i = 0; i < vertices.size(); i++) {
-			double x = inputView->getFieldAs<double>(pdal::Dimension::Id::X, vertices[i]);
-			double y = inputView->getFieldAs<double>(pdal::Dimension::Id::Y, vertices[i]);
-			double z = inputView->getFieldAs<double>(pdal::Dimension::Id::Z, vertices[i]);
-			Vector3d point(x, y, z);
-			points.push_back(point);
-
-            /*view->setField(pdal::Dimension::Id::X, i, x);
-            view->setField(pdal::Dimension::Id::Y, i, y);
-            view->setField(pdal::Dimension::Id::Z, i, z);*/
-        }
-		return points;
-
-       // pdal::PointViewSet views;
-        //views.insert(view);
-
-
-
-        /*std::ofstream out("hranicka.txt");
-        out << std::fixed << std::setprecision(2);
-
-        for (size_t i = 0; i < view->size(); ++i) {
-
-            double ax = view->getFieldAs<double>(Dimension::Id::X, i);
-            double ay = view->getFieldAs<double>(Dimension::Id::Y, i);
-            double az = view->getFieldAs<double>(Dimension::Id::Z, i);
-            out << ax << "," << ay << "," << az << "\n";
-        }
-        out << '\n';*/
-
-    }
-
-
-
-
-    vector<Vector3d> clipBorder(vector<Vector3d> points) {
+    vector<Vector3d> findStraightEdges(string folder, vector<Vector3d> points) {
         double upper_limit = 0.20 * points.size();
         double lower_limit = 0.05 * points.size();
 
         vector<Vector3d> points0 = points;
         vector<vector<Vector3d>> edge_points;
         vector<Vector3d> jacket;
-  
+
 
         bool stop = false;
-		vector<Vector3d> rest_points;
+        vector<Vector3d> rest_points;
+        int count = 1;
+        string filename;
 
-		int count = 1;
-		string filename = "rest" + to_string(count) + ".txt";
+        //velke hrany
         while (points0.size() > 0) {
-            
-            
-            vector<Vector3d> localBorder = findEdgePoints(points0, 0.5, lower_limit, upper_limit, stop);
-  
 
-            if(stop){
-				rest_points = localBorder;
+            filename = folder + "/line" + to_string(count) + ".txt";
+            vector<Vector3d> localEdge = findEdgePoints(filename, points0, 0.5, lower_limit, upper_limit, stop);
+
+            if (stop) {
+                rest_points = localEdge;
                 break;
-			}
-            edge_points.push_back(localBorder);
+            }
+            edge_points.push_back(localEdge);
 
-            
             points0.erase(
-                std::remove_if(points0.begin(), points0.end(),
+                remove_if(points0.begin(), points0.end(),
                     [&](const Vector3d& p)
                     {
-                        return std::find(localBorder.begin(), localBorder.end(), p) != localBorder.end();
+                        return find(localEdge.begin(), localEdge.end(), p) != localEdge.end();
                     }),
                 points0.end());
 
-            printPoints(points0, filename);
+            //printPoints(points0, filename);
             count++;
             filename = "rest" + to_string(count) + ".txt";
-
-            //printPoints(rest_points, "rest.txt");
-
         }
-		
- 
 
-		stop = false;
+
+
+        stop = false;
         upper_limit = 0.15 * rest_points.size();
         lower_limit = 0.05 * rest_points.size();
-        while (rest_points.size() > 0) {
-            vector<Vector3d> localBorder = findEdgePoints(rest_points, 0.5, lower_limit, upper_limit, stop);
 
+        //male hrany
+        while (rest_points.size() > 0) {
+
+            filename = folder + "/line" + to_string(count) + ".txt";
+            vector<Vector3d> localBorder = findEdgePoints(filename, rest_points, 0.5, lower_limit, upper_limit, stop);
 
             if (stop) {
                 rest_points = localBorder;
                 break;
             }
             edge_points.push_back(localBorder);
-            
+
             rest_points.erase(
-                std::remove_if(rest_points.begin(), rest_points.end(),
+                remove_if(rest_points.begin(), rest_points.end(),
                     [&](const Vector3d& p)
                     {
-                        return std::find(localBorder.begin(), localBorder.end(), p) != localBorder.end();
+                        return ::find(localBorder.begin(), localBorder.end(), p) != localBorder.end();
                     }),
                 rest_points.end());
-
         }
-  
-
-
 
 
         for (int i = 0; i < edge_points.size(); i++) {
-    
-			Line3D line;
-            fitLine3D(edge_points[i], line);
-
-			string filename = "lines/line" + to_string(i + 1) + ".txt";
-            
-            writeLineToFile(filename, line.p, line.dir);
+            Line3D line;
+            leastSquares(edge_points[i], line);
+            string filename = "lines/line" + to_string(i + 1) + ".txt";
+            //writeLineToFile(filename, line.p, line.dir);
         }
 
         for (int i = 0; i < edge_points.size(); i++) {
@@ -1641,39 +1667,12 @@ public:
 
             jacket.push_back(p1);
             jacket.push_back(p2);
-
         }
         for (int i = 0; i < rest_points.size(); i++) {
             jacket.push_back(rest_points[i]);
-
         }
 
         return jacket;
-
-
-      
-
-        
-
-    }
-
-    void findCornerPoints(vector<Vector3d> points, Vector3d &p1, Vector3d& p2) {
-
-        double bestDist2 = -1.0;
-        //pair<Vector3d, Vector3d> bestPair;
-
-        for (size_t i = 0; i < points.size(); i++) {
-            for (size_t j = i + 1; j < points.size(); j++) {
-                double dist2 = (points[i] - points[j]).squaredNorm();
-
-                if (dist2 > bestDist2) {
-                    bestDist2 = dist2;
-                    p1 = points[i];
-                    p2 = points[j];   
-                }
-            }
-        }
-
     }
     vector<Vector3d> uniteClosePoints(vector<Vector3d> points, double ratio) {
         vector<Vector3d> result;
@@ -1697,39 +1696,9 @@ public:
             result.push_back(sum / count);
         }
 
-        /*vector<Vector3d> united_points;
-        for (int i = 0; i < points.size(); i++) {
-
-            bool has_pair = false;
-            for (int j = i + 1; j < points.size(); j++) {
-
-                Vector3d p1 = points[i];
-                Vector3d p2 = points[j];
-                double d = (p1 - p2).norm();
-                cout << "d " << d << endl;
-
-                if (d < ratio) {
-                    cout << "truuuuuuu " << endl;
-                    Vector3d unity = (p1 + p2) / 2.0;
-                    united_points.push_back(unity);
-                    has_pair = true;
-                }
-            }
-
-            if (!has_pair) {
-                cout << "whyyy " << endl;
-                united_points.push_back(points[i]);
-            }
-
-            
-        }*/
-
         return result;
-
     }
     vector<Vector3d> orderPoints(vector<Vector3d> jacket, Vector3d centroid) {
-
-
 
         Vector3d anchor_point = jacket[0];
         vector<double> angles;
@@ -1773,678 +1742,107 @@ public:
 
 
         return sortedPoints;
-
-
-
-        /*int n = jacket.size();
-        vector<bool> used(n, false);
-        vector<Vector3d> ordered;
-        ordered.reserve(n);
-
-
-        int startIndex = 0;
-        int current = startIndex;
-        ordered.push_back(jacket[current]);
-        used[current] = true;
-
-        for (int step = 1; step < n; step++)
-        {
-            int bestIndex = -1;
-            double bestDist = (std::numeric_limits<double>::max)();
-
-            for (int i = 0; i < n; i++)
-            {
-                if (used[i])
-                    continue;
-
-                double d = (jacket[i] - jacket[current]).squaredNorm();
-                if (d < bestDist)
-                {
-                    bestDist = d;
-                    bestIndex = i;
-                }
-            }
-
-            current = bestIndex;
-            used[current] = true;
-            ordered.push_back(jacket[current]);
-        }
-
-        return ordered;*/
-
-
-    }
-    void calculateCentroid() {
-
-        auto start = chrono::high_resolution_clock::now();
-        cout << "BEGINNING centroid CALCULATING " << endl;
-
-        for (int i = 0; i < roofs.size(); i++)
-        {
-
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++)
-            {
-                
-                double sumx = 0;
-                double sumy = 0;
-                double sumz = 0;
-                PointViewPtr view = *roofs[i].fsubroof[j]->view.begin();
-                for (int k = 0; k < view->size(); k++)
-                {
-                    
-
-                    const double x = view->getFieldAs<double>(Dimension::Id::X, k);
-                    const double y = view->getFieldAs<double>(Dimension::Id::Y, k);
-                    const double z = view->getFieldAs<double>(Dimension::Id::Z, k);
-                    sumx += x;
-                    sumy += y;
-                    sumz += z;
-                }
-                roofs[i].fsubroof[j]->centroid.x() = sumx / view->size();
-                roofs[i].fsubroof[j]->centroid.y() = sumy / view->size();
-                roofs[i].fsubroof[j]->centroid.z() = sumz / view->size();
-
-                
-            }
-
-
-        }
-
-
-
-
-
-
-        chrono::duration<double> elapsedd = chrono::high_resolution_clock::now() - start;
-        cout << "\n\nFINISHING " << elapsedd.count() << " seconds.\n";
-    }
-    void printCentroids(string foldername) {
-
-        
-
-
-
-
-        error_code ec;
-        filesystem::path dir = foldername;
-        auto n = filesystem::remove_all(dir, ec); // deletes directory + all contents
-        filesystem::create_directories(foldername);
-
-
-        for (int i = 0; i < roofs.size(); i++)
-        {
-            string path = foldername + "/roof" + to_string(i + 1);
-
-            filesystem::create_directories(path);
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++)
-            {
-                Vector3d centroid = roofs[i].fsubroof[j]->centroid;
-
-                string fileName = path + "/centroid" + to_string(j + 1) + ".txt";
-                ofstream out(fileName);
-                out << fixed << std::setprecision(3);
-
-                out << centroid.x() << "," << centroid.y() << "," << centroid.z() << endl;
-            }
-
-
-        }
-
     }
 
-
-    void writeLineToFile(const std::string& filename, const Vector3d& p0, const Vector3d& dir)
-    {
-        std::ofstream file(filename, std::ios::app);
-  
-  
-
-        file << std::fixed << std::setprecision(6) << p0.x() << ", " << p0.y() << ", " << p0.z() << "\n";
-        file << std::fixed << std::setprecision(6) << dir.x() << ", " << dir.y() << ", " << dir.z() << "\n";
-    }
-
-    vector<Vector3d> findEdgePoints(vector<Vector3d> all_points, double ratio, double points_lower_limit, double points_upper_limit, bool& stop) {
-        cout << "finding Edge Points  " << endl;
-        cout << "all_points " << all_points.size()   << endl;
-
-        for (int i = 0; i < all_points.size(); i++) {
-            for (int j = i + 1; j < all_points.size(); j++) {
-
-
-
-                //first round
-				size_t points_count = 0;
-				vector<Vector3d> line_points;
-                Line3D line;
-                line.p = all_points[i];
-                line.dir = all_points[j] - all_points[i];
-                for (int k = 0; k < all_points.size(); k++) {
-                    if(k!= i && k != j){
-
-                        Vector3d C = all_points[k];
-                        double d = distanceToLine(line, C);
-                        if (d < ratio) {
-							line_points.push_back(C);
-                            points_count++;
-                        }
-					}
-                }
-                line_points.push_back(all_points[i]);
-                line_points.push_back(all_points[j]);
-                points_count++;
-                points_count++;
-
-
-                
-
-                ////second round - better line fit
-                if (points_count > points_lower_limit) {
-                                   
-                    points_count = 0;
-                    fitLine3D(line_points, line);
-                    line_points.clear();
-                    for (int k = 0; k < all_points.size(); k++) {
-                        if (k != i && k != j) {
-
-         
-                            Vector3d C = all_points[k];
-                            double d = distanceToLine(line, C);
-                            if (d < ratio) {
-                                line_points.push_back(C);
-                                points_count++;
-
-                            }
-                        }
-                    }
-                    if (points_count > points_upper_limit) {
-                        cout << "--------points_count   " << points_count << endl;
-						line_points.push_back(all_points[i]);
-						line_points.push_back(all_points[j]);
-                        return line_points;
-                    }
-                }
-
-
-
-            }
-        }
-
-		stop = true;
-		return all_points;
-    }
-    void fitLine3D(const vector<Vector3d>& points, Line3D& line) {
-        int n = static_cast<int>(points.size());
-        if (n == 0)
-            throw std::runtime_error("No points.");
-
-        // 1. centroid
-        line.p.setZero();
-        for (const auto& p : points)
-            line.p += p;
-        line.p /= static_cast<double>(n);
-
-        // 2. covariance-like matrix
-        Matrix3d S = Matrix3d::Zero();
-        for (const auto& p : points)
-        {
-            Vector3d d = p - line.p;
-            S += d * d.transpose();
-        }
-
-        // 3. dominant eigenvector by power iteration
-        Vector3d v(1.0, 1.0, 1.0);
-        v.normalize();
-
-        for (int i = 0; i < 100; ++i)
-        {
-            v = S * v;              // matrix * vector
-            if (v.norm() == 0.0)    // safety check
-                break;
-            v.normalize();          // normalize in place
-        }
-
-        line.dir = v;
-    }
-
-
-
-
-
-    void attachTriangularMesh(PointViewPtr view, TriangularMesh mesh)
-    {
-        TriangularMesh* dst = view->createMesh("");
-        *dst = std::move(mesh);
-        cout << "reduced size " << dst->size() << endl;
-        //return dst;
-    }
-    void getBorder(PointViewPtr view, vector<int> *input, string filename) {
- 
-        std::ofstream out(filename);
-        out << std::fixed << std::setprecision(2);
-
-        for (size_t i = 0; i < input->size(); ++i) {
-
-            double ax = view->getFieldAs<double>(Dimension::Id::X, input->at(i));
-            double ay = view->getFieldAs<double>(Dimension::Id::Y, input->at(i));
-            double az = view->getFieldAs<double>(Dimension::Id::Z, input->at(i));
-
-			out << ax << "," << ay << "," << az << "\n";
-        }
-        out << '\n';
-	
-
-    }
-    void printPoints(vector<Vector3d> input, string filename) {
-
-
-        std::ofstream out(filename);
-        out << std::fixed << std::setprecision(2);
-
-        for (size_t i = 0; i < input.size(); ++i) {
-
-            double ax = input[i].x();
-            double ay = input[i].y();
-            double az = input[i].z();
-
-            out << ax << "," << ay << "," << az << "\n";
-        }
-        out << '\n';
-    }
-
-
-
-    PointViewPtr createFilteredMeshCompact(
-        pdal::PointViewPtr srcView,
-		double alpha /*= 0.5*/,
-        const std::string& srcMeshName /*= "delaunay2d"*/,
-        const std::string& dstMeshName /*= "filtered"*/)
-    {
-
-        TriangularMesh* srcMesh = srcView->mesh(srcMeshName);
-        PointViewPtr outView = srcView->makeNew();
-
-        // New mesh attached to outView
-        TriangularMesh* outMesh = outView->createMesh(dstMeshName);
-  
-
-        // Map old point IDs -> new point IDs (for remapping triangle indices)
-        unordered_map<PointId, PointId> idMap;
-        idMap.reserve(srcView->size());
-
-        auto getOrCopyPoint = [&](PointId oldId) -> PointId
-            {
-                auto it = idMap.find(oldId);
-                if (it != idMap.end())
-                    return it->second;
-
-                // Copy one point from srcView to outView (same dimensions)
-                pdal::PointId newId = outView->size();
-                outView->appendPoint(*srcView, oldId);   // <-- PDAL API used for point copy
-                idMap.emplace(oldId, newId);
-                return newId;
-            };
-
-        for (const Triangle& t : *srcMesh)
-        {
-            PointId a = t.m_a, b = t.m_b, c = t.m_c;
-
-            double ax = srcView->getFieldAs<double>(Dimension::Id::X, a);
-            double ay = srcView->getFieldAs<double>(Dimension::Id::Y, a);
-            double az = srcView->getFieldAs<double>(Dimension::Id::Z, a);
-
-            double bx = srcView->getFieldAs<double>(Dimension::Id::X, b);
-            double by = srcView->getFieldAs<double>(Dimension::Id::Y, b);
-            double bz = srcView->getFieldAs<double>(Dimension::Id::Z, b);
-
-            double cx = srcView->getFieldAs<double>(Dimension::Id::X, c);
-            double cy = srcView->getFieldAs<double>(Dimension::Id::Y, c);
-            double cz = srcView->getFieldAs<double>(Dimension::Id::Z, c);
-
-
-            double da = distanceBetweenPoints(ax, ay, bx, by);
-            double db = distanceBetweenPoints(bx, by, cx, cy);
-            double dc = distanceBetweenPoints(cx, cy, ax, ay);
-
-			double s = (da + db + dc) / 2.0;
-			double area = sqrt(s * (s - da) * (s - db) * (s - dc));
-            // Example policy: keep triangle only if ALL 3 vertices pass
-            if (area < alpha)
-            {
-                continue;
-            }
-
-            // Copy points lazily and remap indices
-            PointId na = getOrCopyPoint(a);
-            PointId nb = getOrCopyPoint(b);
-            PointId nc = getOrCopyPoint(c);
-
-            outMesh->add(na, nb, nc);
-        }
-
-        return outView;
-    }
-
-
-    bool intersectPlanes(const BestFitPlane& p1, const BestFitPlane& p2, Line3D& out, double eps = 1e-12)
-    {
-        Eigen::Vector3d u = p1.normal.cross(p2.normal);
-        double denom = u.squaredNorm();
-
-        if (denom < eps) {
-            // Planes are parallel (or nearly). Could be distinct or the same plane.
-            return false;
-        }
-
-        // Point on intersection line:
-        Eigen::Vector3d p0 = ((p2.d * p1.normal - p1.d * p2.normal).cross(u)) / denom;
-
-        out.p = p0;
-        out.dir = u; // you can normalize if you want: u.normalized()
-        return true;
-    }
-    void computateLines() {
-
+    void computateLines(double ratio) {
         for (int i = 0; i < roofs.size(); i++) {
             cout << "COMPUTING LINES OF ROOF....." << i << endl;
 
-
-			int linescount = 0;
+            int linescount = 0;
             for (int j = 0; j < roofs[i].plane.size() - 1; j++) {
                 for (int k = j + 1; k < roofs[i].plane.size(); k++) {
-
-					linescount++;
+                    linescount++;
                     Line3D line;
                     intersectPlanes(roofs[i].plane[j], roofs[i].plane[k], line);
                     Vector2d origin(j, k);
                     line.origin_planes = origin;
-                    //cout << "Line " << linescount << " of plane " << j + 1 << " and plane " << k + 1 << endl;
-                    //cout << line.p.x() << "," << line.p.y() << "," << line.p.z() << endl;
-					//cout << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << endl << endl;
 
-
-                    if (neighbors(roofs[i].jacket[j], roofs[i].jacket[k])) {
+                    if (neighbors(roofs[i].jacket[j], roofs[i].jacket[k], ratio)) {
                         roofs[i].lines.push_back(line);
-                        cout << "valuable line found "  << endl;
-                    }             
-                }
-
-                
-            }
-        }
-	}
-    bool neighbors(vector<Vector3d> one, vector<Vector3d> two) {
-        double ratio = 2.5;
-
-
-
-        for (int i = 0; i < one.size(); i++)
-        {
-            for (int j = 0; j < two.size(); j++)
-            {
-
-
-                double distance = (one[i] - two[j]).norm();
-                cout << "distance " << distance << endl;
-                if (distance < ratio) {
-                    return true;
+                    }
                 }
             }
         }
-        return false;
-
-
-
     }
-
-
-    void computateMeshes() {
-
+    void shiftPoints(double ratio) {
 
         for (int i = 0; i < roofs.size(); i++) {
 
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-                auto clean = makeMeshReadyViewDeep(*roofs[i].fsubroof[j]->view.begin());
-                clean = buildDelaunayMesh(clean);
-                //TriangularMesh* mesh = clean.view->mesh("delaunay2d");
-                
-                roofs[i].mesh_ready_view.push_back(clean);
-
-				TriangularMesh* mesh = roofs[i].mesh_ready_view[j].view->mesh("");
-                
-                roofs[i].initial_mesh.push_back(mesh);
-            }
-        }
-
-    }
-    MeshReadyView makeMeshReadyView(const pdal::PointViewPtr& src)
-    {
-        using namespace pdal;
-
-        auto table = std::make_shared<PointTable>();
-        auto layout = table->layout();
-
-        auto keepIfExists = [&](Dimension::Id id)
+            //collecting all main roof points
+            vector<Vector3d> mainroof_points;
+            vector<int> subroof;
+            for (int j = 0; j < roofs[i].jacket.size(); j++)
             {
-                if (src->layout()->hasDim(id))
-                    layout->registerDim(id);
-            };
+                subroof.push_back(i);
+                for (int k = 0; k < roofs[i].jacket[j].size(); k++)
+                {
+                    Vector3d point = roofs[i].jacket[j][k];
+                    mainroof_points.push_back(point);
+                }
+            }
 
-        // Keep only dimensions safe/useful for mesh export
-        keepIfExists(Dimension::Id::X);
-        keepIfExists(Dimension::Id::Y);
-        keepIfExists(Dimension::Id::Z);
-        keepIfExists(Dimension::Id::NormalX);
-        keepIfExists(Dimension::Id::NormalY);
-        keepIfExists(Dimension::Id::NormalZ);
-        keepIfExists(Dimension::Id::Curvature);
 
-        pdal::PointViewPtr dst(new pdal::PointView(*table));
+            for (int j = 0; j < mainroof_points.size(); j++) {
 
-        for (pdal::PointId i = 0; i < src->size(); ++i)
-            dst->appendPoint(*src, i);   // copies only dimensions registered above
+                for (int k = 0; k < roofs[i].lines.size(); k++)
+                {
 
-        return { table, dst };
-    }
-    MeshReadyView makeMeshReadyViewDeep(const pdal::PointViewPtr& src)
-    {
-        using namespace pdal;
+                    Line3D line = roofs[i].lines[k];
+                    /*int origin_plane1 = roofs[i].lines[k].origin_planes.x();
+                    int origin_plane2 = roofs[i].lines[k].origin_planes.y();
+                    if ((origin_plane1 == subroof[j]) || (origin_plane2 == subroof[j])) {
 
-        MeshReadyView out;
-        out.table = std::make_shared<PointTable>();
-        auto layout = out.table->layout();
+                    }*/
 
-        auto keep = [&](Dimension::Id id)
+
+                    double denom = line.dir.dot(line.dir);
+                    if (denom == 0.0) {
+                        throw std::runtime_error("Line direction vector has zero length");
+                    }
+                    double dist = (mainroof_points[j] - line.p).cross(line.dir).norm() / denom;
+
+
+                    if (dist < ratio) {
+                        double t = line.dir.dot(mainroof_points[j] - line.p) / denom;
+                        Vector3d unite = line.p + t * line.dir;
+                        mainroof_points[j] = unite;
+                    }
+
+                }
+            }
+
+
+
+            //regrouping
+            int count = 0;
+            for (int j = 0; j < roofs[i].jacket.size(); j++)
             {
-                if (src->layout()->hasDim(id))
-                    layout->registerDim(id);
-            };
-
-        keep(Dimension::Id::X);
-        keep(Dimension::Id::Y);
-        keep(Dimension::Id::Z);
-        keep(Dimension::Id::NormalX);
-        keep(Dimension::Id::NormalY);
-        keep(Dimension::Id::NormalZ);
-        keep(Dimension::Id::Curvature);
-
-        out.view.reset(new PointView(*out.table));
-
-        for (pdal::PointId i = 0; i < src->size(); ++i)
-        {
-            pdal::PointId id = out.view->size();
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::X))
-                out.view->setField(pdal::Dimension::Id::X, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::X, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::Y))
-                out.view->setField(pdal::Dimension::Id::Y, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::Y, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::Z))
-                out.view->setField(pdal::Dimension::Id::Z, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::Z, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::NormalX))
-                out.view->setField(pdal::Dimension::Id::NormalX, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::NormalX, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::NormalY))
-                out.view->setField(pdal::Dimension::Id::NormalY, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::NormalY, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::NormalZ))
-                out.view->setField(pdal::Dimension::Id::NormalZ, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::NormalZ, i));
-
-            if (src->layout()->hasDim(pdal::Dimension::Id::Curvature))
-                out.view->setField(pdal::Dimension::Id::Curvature, id,
-                    src->getFieldAs<double>(pdal::Dimension::Id::Curvature, i));
-        }
-
-        return out;
-    }
-
-    void printMeshes(string folder) {
-
-        filesystem::create_directories(folder);
-        for (int i = 0; i < roofs.size(); i++) {
-
-
-            string path = folder + "/roof" + to_string(i + 1);
-            filesystem::create_directories(path);
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-				auto clean = roofs[i].mesh_ready_view[j];
-               // auto clean = makeMeshReadyViewDeep(*roofs[i].fsubroof[j]->view.begin());
-                //clean = buildDelaunayMesh(clean);
-
-                std::cout << "points: " << clean.view->size() << '\n';
-                std::cout << "mesh: " << (clean.view->mesh("delaunay2d") ? "yes" : "no") << '\n';
-
-                cout << "j " << j << endl;
-                string name = folder + "/roof" + to_string(i + 1) + "/subroof" + to_string(j + 1) + "mesh.ply";
-                cout << "name     " << name << endl;
-
-                writeMeshToPly(clean, name);
-     
+                for (int k = 0; k < roofs[i].jacket[j].size(); k++)
+                {
+                    roofs[i].jacket[j][k] = mainroof_points[count];
+                    count++;
+                }
             }
-        }
-    }
-    void printLines(string folder) {
 
 
-        filesystem::create_directories(folder);
-        for (int i = 0; i < roofs.size(); i++) {
-            string path = folder + "/roof" + to_string(i + 1);
-            filesystem::create_directories(path);
-
-            for (int j = 0; j < roofs[i].lines.size(); j++) {
-                string fileName = path + "/line" + to_string(j + 1) + ".txt";
-                Line3D line = roofs[i].lines[j];
-                
-                ofstream out(fileName);
-                out << std::fixed << std::setprecision(8);
-
-
-                out << line.p.x() << "," << line.p.y() << "," << line.p.z() << "\n";
-                out << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << "\n";
-                out << '\n';
-            }
-        }
-    }
-
-    void cutRoofs(double alpha) {
-
-
-        cout << "roofs.size() " << roofs.size() << endl;
-
-        for (int i = 0; i < roofs.size(); i++) {
-
-            cout << "roofs[i].fsubroof.size() " << roofs[i].fsubroof.size() << endl;
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-                //TriangularMesh nm = cutMesh(*roofs[i].fsubroof[j]->view.begin(), roofs[i].initial_mesh[j], 0.25);
-                TriangularMesh nm = cutMesh(roofs[i].mesh_ready_view[j].view, roofs[i].initial_mesh[j], alpha);
-    
-                //attachTriangularMesh(*roofs[i].fsubroof[j]->view.begin(), nm);
-                attachTriangularMesh(roofs[i].mesh_ready_view[j].view, nm);
-
-				roofs[i].new_mesh.push_back(nm);
-
-            }
-        }
-    }
-    void getJackets() {
-
-        for (int i = 0; i < roofs.size(); i++) {
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-                TriangularMesh m = roofs[i].new_mesh[j];
-                vector<int> jacketIDs = hollowMesh(*roofs[i].fsubroof[j]->view.begin(), m);
-                roofs[i].jacket.push_back(createJacket(*roofs[i].fsubroof[j]->view.begin(), jacketIDs));
-                
-                cout << "JACKET SIZE    " << roofs[i].jacket[j].size() << endl;
-            }
-        }
-    }
-    void printJackets(string folder) {
-
-        filesystem::create_directories(folder);
-        for (int i = 0; i < roofs.size(); i++) {
-            string path = folder + "/roof" + to_string(i + 1);
-            filesystem::create_directories(path);
-
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-                string fileName = path + "/jacket" + to_string(j + 1) + ".txt";
-                printPoints(roofs[i].jacket[j], fileName);
-            }
-        }
-    }
-
-
-    void modifyJackets() {
-        
-        
-        for (int i = 0; i < roofs.size(); i++) {
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-                
-                
-                vector<Vector3d> jacket = roofs[i].jacket[j];
-                Vector3d centroid = roofs[i].fsubroof[j]->centroid;
-
-
-                jacket = clipBorder(jacket);
-                jacket = uniteClosePoints(jacket, 2.);
-                jacket = orderPoints(jacket, centroid);
-
-                roofs[i].jacket[j] = jacket;
-            }
         }
 
 
-
-        
     }
     void uniteAllPoints(double ratio) {
 
-
-        
         for (int i = 0; i < roofs.size(); i++)
         {
-            
+
             //collecting all main roof points
             vector<Vector3d> mainroof_points;
             for (int j = 0; j < roofs[i].jacket.size(); j++)
             {
                 for (int k = 0; k < roofs[i].jacket[j].size(); k++)
                 {
-
                     Vector3d point = roofs[i].jacket[j][k];
                     mainroof_points.push_back(point);
-                }     
-                
+                }
             }
 
 
@@ -2457,7 +1855,7 @@ public:
                 bool found = false;
                 for (int k = j + 1; k < mainroof_points.size(); k++)
                 {
-                    
+
                     double distance = (mainroof_points[j] - mainroof_points[k]).norm();
                     if (distance < ratio) {
                         united.push_back(mainroof_points[k]);
@@ -2490,7 +1888,6 @@ public:
             }
 
 
-
             //regrouping
             int count = 0;
             for (int j = 0; j < roofs[i].jacket.size(); j++)
@@ -2502,90 +1899,11 @@ public:
                 }
 
             }
-
-
         }
-
     }
 
-    void shiftPoints(double ratio) {
-
-        for (int i = 0; i < roofs.size(); i++) {
-
-            //collecting all main roof points
-            vector<Vector3d> mainroof_points;
-            vector<int> subroof;
-            for (int j = 0; j < roofs[i].jacket.size(); j++)
-            {
-                subroof.push_back(i);
-
-                for (int k = 0; k < roofs[i].jacket[j].size(); k++)
-                {
-
-                    Vector3d point = roofs[i].jacket[j][k];
-                    mainroof_points.push_back(point);
-                }
-            }
 
 
-
-            //cout << "ROOF " << i << endl;
-            for (int j = 0; j < mainroof_points.size(); j++) {
-
-
-
-              // cout << "j " << j << endl;
-                //cout << "roofs[i].lines.size()   " << roofs[i].lines.size() << endl;
-                for (int k = 0; k < roofs[i].lines.size(); k++)
-                {
-
-                    Line3D line = roofs[i].lines[k];
-                    int origin_plane1 = roofs[i].lines[k].origin_planes.x();
-                    int origin_plane2 = roofs[i].lines[k].origin_planes.y();
-                    if ((origin_plane1 == subroof[j]) || (origin_plane2 == subroof[j])) {
-
-                    }
-
-
-                    double denom = line.dir.dot(line.dir);
-                    if (denom == 0.0) {
-                        throw std::runtime_error("Line direction vector has zero length");
-                    }
-                    double dist = (mainroof_points[j] - line.p).cross(line.dir).norm() / denom;
-
-                    //cout << "dist " << dist << endl;
-
-
-                    if (dist < ratio) {
-
-                        double t = line.dir.dot(mainroof_points[j] - line.p) / denom;
-                        Vector3d unite = line.p + t * line.dir;
-                        mainroof_points[j] = unite;
-
-                        //cout << "ITEM FOUND "  << endl;
-                    }
-                    
-                }
-            }
-
-
-
-            //regrouping
-            int count = 0;
-            for (int j = 0; j < roofs[i].jacket.size(); j++)
-            {
-                for (int k = 0; k < roofs[i].jacket[j].size(); k++)
-                {
-                    roofs[i].jacket[j][k] = mainroof_points[count];
-                    count++;
-                }
-            }
-
-
-        }
-
-
-    }
 
 
 };
@@ -2630,10 +1948,6 @@ int main() {
     /*pdal::PointTable table;
     pdal::PointViewPtr view = loadXYZ_withReaderText(table, "C:/C/PointReader/build/finalRoofs/roof1/subroof2.txt");
     cout << "size " << view->size() << endl;
-
-
-
-
 
 
     auto clean = p.makeMeshReadyViewDeep(view);
@@ -2697,58 +2011,43 @@ int main() {
 
 
     p.makePointViewSetRoofs();      //   buildpoint --> roofs
-    p.printMainRoofs(*p.buildpoint.begin(), out_file, "mainroofs");
+    p.modifySubroofs();
+    p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
+    p.finalizeSubroofs();
+    p.clusterByPoints(0.5, 70);
+    p.endSubroofs();                    //filling PointViewSet fsubroofs
 
 
-    ////p.clusterByPoints("mainroofs", 0.25, 60);                //klasterizacia hlavnych striech na podstrechy
-    p.clusterByPoints("mainroofs", 1, 60); 
-    //p.makeClusteredRoofsFiles("subroofs");
-     
-    
-    p.fillSubroofs();
-    //p.modifySubroofs();
-    //p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
-    //p.finalizeSubroofs();
-    //p.printFinalRoofs("finalRoofs");
-
-
-
-    //p.clusterByPoints("nroofs", 0.5, 70);
-    //p.endSubroofs();
-    //p.printFinalRoofs22("finalRoofsTotal");
-
-
-
-    //p.calculateCentroid();
-    //p.printCentroids("Centroids");
-    //cout << "1 " << endl;
-    //p.computatePlanes();
-    //cout << "2 " << endl;
-    //p.printPlanes("planes");
-    //cout << "3 " << endl;
-
-
-    //p.computateMeshes();
-    ////p.printMeshes("initialMeshes");
-    //p.cutRoofs(0.25);
-    ////p.printMeshes("cutMeshes25");
-    //p.getJackets();
-    //p.modifyJackets();
-
-    //p.printJackets("jacketsFINAL");
-
-    //p.computateLines();
-    //p.printLines("ciary");
+    p.printMainRoofs(*p.buildpoint.begin(), out_file, "mainRoofs");
+    p.printRoofs(out_file, "normalRoofs");
+    p.printRoofs(out_file, "finalRoofs");
 
 
 
 
-    //p.shiftPoints(3.2);
-    //p.uniteAllPoints(1.25);
-    //p.printJackets("jacketsUnitedFINAL");
+    p.calculateCentroid();
+    p.computatePlanes();
+    p.printCentroids(out_file, "centroids");
+    p.printPlanes(out_file, "planes");
+
+
+    p.computateMeshes();
+    p.printMeshes(out_file, "initialMeshes");
+
+    p.alphaMeshClip(0.25);
+    p.printMeshes(out_file, "alphaClippedMeshes");
+    p.getJackets();
+    p.printJackets(out_file, "rawJackets");
+    p.modifyJackets(out_file);
+    p.printJackets(out_file, "orderedJackets");
 
 
 
+    p.computateLines(2.5);
+    p.printLines(out_file, "lines");
+    p.shiftPoints(3.2);
+    p.uniteAllPoints(1.25);
+    p.printJackets(out_file, "finalJackets");
 
 
 
