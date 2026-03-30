@@ -186,7 +186,7 @@ private:
 
 class PointReader {
 private:
-    bool print_progress = true;
+    bool print_progress = false;
     StageFactory factory;
     PipelineManager manager;
     PointTable mainTable;
@@ -1172,6 +1172,45 @@ public:
             unordered_set<double> clusterIDs = getRoofsIDs(msubroof);
             double numClusters = clusterIDs.size();
 
+            cout << "Number of clusters for roof " << i + 1 << ": " << numClusters << endl;
+            cout << "msubroof->size() " << msubroof->size() << endl;
+
+            if (numClusters == 0) {
+                auto rd = std::make_unique<RoofData>();
+                PointLayoutPtr layout = rd->table.layout();
+                layout->registerDim(Dimension::Id::X);
+                layout->registerDim(Dimension::Id::Y);
+                layout->registerDim(Dimension::Id::Z);
+                layout->registerDim(Dimension::Id::NormalX);
+                layout->registerDim(Dimension::Id::NormalY);
+                layout->registerDim(Dimension::Id::NormalZ);
+                layout->registerDim(Dimension::Id::Curvature);
+                layout->registerDim(Dimension::Id::ClusterID);
+                PointViewPtr view(new PointView(rd->table));
+                for (int m = 0; m < msubroof->size(); m++) {
+                    double x = subroof->getFieldAs<double>(Dimension::Id::X, m);
+                    double y = subroof->getFieldAs<double>(Dimension::Id::Y, m);
+                    double z = subroof->getFieldAs<double>(Dimension::Id::Z, m);
+                    double nx = subroof->getFieldAs<double>(Dimension::Id::NormalX, m);
+                    double ny = subroof->getFieldAs<double>(Dimension::Id::NormalY, m);
+                    double nz = subroof->getFieldAs<double>(Dimension::Id::NormalZ, m);
+                    double curv = subroof->getFieldAs<double>(Dimension::Id::Curvature, m);
+                    view->setField(Dimension::Id::X, m, x);
+                    view->setField(Dimension::Id::Y, m, y);
+                    view->setField(Dimension::Id::Z, m, z);
+                    view->setField(Dimension::Id::NormalX, m, nx);
+                    view->setField(Dimension::Id::NormalY, m, ny);
+                    view->setField(Dimension::Id::NormalZ, m, nz);
+                    view->setField(Dimension::Id::Curvature, m, curv);
+                    view->setField(Dimension::Id::ClusterID, m, 0);
+                }
+                rd->view.insert(view);
+                roofs[i].nsubroof.push_back(move(rd));
+				continue;
+            }
+
+
+
             for (int l = 0; l < numClusters; l++) {
 
                 auto rd = std::make_unique<RoofData>();
@@ -1545,6 +1584,10 @@ public:
         }
     }
     void modifyJackets(string out_file) {
+        auto start = std::chrono::high_resolution_clock::now();
+        
+
+
         string mainpath1 = out_file + "/withoutEdges";
         string mainpath2 = out_file + "/unitedPoints";
         string mainpath3 = out_file + "/leastSquaredLines";
@@ -1559,6 +1602,8 @@ public:
             filesystem::create_directories(path1);
             filesystem::create_directories(path2);
             filesystem::create_directories(path3);
+			cout << "Modifying jackets of roof " << i + 1 << endl;
+
 
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
@@ -1572,15 +1617,22 @@ public:
                 jacket = findStraightEdges(fp, jacket);
                 string fileName = path1 + "/jacket" + to_string(j + 1) + ".txt";
                 printJacketPoints(jacket, fileName);
+                
 
-                jacket = uniteClosePoints(jacket, 2.);
+                jacket = uniteClosePoints(jacket, 0.9);
                 fileName = path2 + "/jacket" + to_string(j + 1) + ".txt";
                 printJacketPoints(jacket, fileName);
 
+
                 jacket = orderPoints(jacket, centroid);
                 roofs[i].jacket[j] = jacket;
+
             }
         }
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end - start;
+        std::cout << "Modify jackets ran in " << elapsed.count() << " seconds.\n";
     }
     
 
@@ -1589,6 +1641,7 @@ public:
     vector<Vector3d> findStraightEdges(string folder, vector<Vector3d> points) {
         double upper_limit = 0.20 * points.size();
         double lower_limit = 0.05 * points.size();
+		double distance_from_line = 0.5;
 
         vector<Vector3d> points0 = points;
         vector<vector<Vector3d>> edge_points;
@@ -1604,7 +1657,7 @@ public:
         while (points0.size() > 0) {
 
             filename = folder + "/line" + to_string(count) + ".txt";
-            vector<Vector3d> localEdge = findEdgePoints(filename, points0, 0.5, lower_limit, upper_limit, stop);
+            vector<Vector3d> localEdge = findEdgePoints(filename, points0, distance_from_line, lower_limit, upper_limit, stop);
 
             if (stop) {
                 rest_points = localEdge;
@@ -1612,17 +1665,16 @@ public:
             }
             edge_points.push_back(localEdge);
 
-            points0.erase(
-                remove_if(points0.begin(), points0.end(),
-                    [&](const Vector3d& p)
+            points0.erase(remove_if(points0.begin(), points0.end(),[&](const Vector3d& p)
                     {
                         return find(localEdge.begin(), localEdge.end(), p) != localEdge.end();
                     }),
                 points0.end());
 
             //printPoints(points0, filename);
+            
+            //filename = "rest" + to_string(count) + ".txt";
             count++;
-            filename = "rest" + to_string(count) + ".txt";
         }
 
 
@@ -1635,7 +1687,7 @@ public:
         while (rest_points.size() > 0) {
 
             filename = folder + "/line" + to_string(count) + ".txt";
-            vector<Vector3d> localBorder = findEdgePoints(filename, rest_points, 0.5, lower_limit, upper_limit, stop);
+            vector<Vector3d> localBorder = findEdgePoints(filename, rest_points, distance_from_line, lower_limit, upper_limit, stop);
 
             if (stop) {
                 rest_points = localBorder;
@@ -1650,7 +1702,9 @@ public:
                         return ::find(localBorder.begin(), localBorder.end(), p) != localBorder.end();
                     }),
                 rest_points.end());
+            count++;
         }
+  
 
 
         for (int i = 0; i < edge_points.size(); i++) {
@@ -1744,10 +1798,33 @@ public:
         return sortedPoints;
     }
 
-    void computateLines(double ratio) {
-        for (int i = 0; i < roofs.size(); i++) {
-            cout << "COMPUTING LINES OF ROOF....." << i << endl;
+    void computeLinesForOneRoof(size_t i, double ratio) {
+        vector<Line3D> localLines;
+        cout << "COMPUTING LINES FOR ROOF " << i << endl;
 
+        for (size_t j = 0; j + 1 < roofs[i].plane.size(); ++j) {
+            for (size_t k = j + 1; k < roofs[i].plane.size(); ++k) {
+                Line3D line;
+                intersectPlanes(roofs[i].plane[j], roofs[i].plane[k], line);
+
+                Vector2d origin(j, k);
+                line.origin_planes = origin;
+
+                if (neighbors(roofs[i].jacket[j], roofs[i].jacket[k], ratio)) {
+                    localLines.push_back(line);
+                }
+            }
+        }
+
+        roofs[i].lines = move(localLines);
+
+
+
+
+
+
+        /*for (int i = 0; i < roofs.size(); i++) {
+            cout << "COMPUTING LINES OF ROOF....." << i << endl;
             int linescount = 0;
             for (int j = 0; j < roofs[i].plane.size() - 1; j++) {
                 for (int k = j + 1; k < roofs[i].plane.size(); k++) {
@@ -1762,11 +1839,36 @@ public:
                     }
                 }
             }
+        }*/
+    }
+    void computeLines(double ratio) {
+        unsigned int threadCount = std::thread::hardware_concurrency();
+        if (threadCount == 0) threadCount = 4;   // fallback
+
+        threadCount = (std::min)(threadCount, (unsigned int)roofs.size());
+
+        vector<thread> threads;
+        threads.reserve(threadCount);
+
+        for (unsigned int t = 0; t < threadCount; ++t) {
+            threads.emplace_back([this, t, threadCount, ratio]() {
+                for (size_t i = t; i < roofs.size(); i += threadCount) {
+                    computeLinesForOneRoof(i, ratio);
+                }
+                });
+        }
+
+        for (auto& th : threads) {
+            th.join();
         }
     }
+
+
     void shiftPoints(double ratio) {
+        cout << "shifting points to nearest line " << endl;
 
         for (int i = 0; i < roofs.size(); i++) {
+			cout << "shifting points of roof " << i + 1 << endl;
 
             //collecting all main roof points
             vector<Vector3d> mainroof_points;
@@ -1830,6 +1932,8 @@ public:
 
     }
     void uniteAllPoints(double ratio) {
+		cout << "uniting close points " << endl;
+
 
         for (int i = 0; i < roofs.size(); i++)
         {
@@ -2012,7 +2116,7 @@ int main() {
 
     p.makePointViewSetRoofs();      //   buildpoint --> roofs
     p.modifySubroofs();
-    p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
+    p.clusterByNormals(0.01, 50);            //klasterizacia podstriech na mensie podstrechy
     p.finalizeSubroofs();
     p.clusterByPoints(0.5, 70);
     p.endSubroofs();                    //filling PointViewSet fsubroofs
@@ -2034,7 +2138,7 @@ int main() {
     p.computateMeshes();
     p.printMeshes(out_file, "initialMeshes");
 
-    p.alphaMeshClip(0.25);
+    p.alphaMeshClip(4.);
     p.printMeshes(out_file, "alphaClippedMeshes");
     p.getJackets();
     p.printJackets(out_file, "rawJackets");
@@ -2043,9 +2147,11 @@ int main() {
 
 
 
-    p.computateLines(2.5);
+    p.computeLines(2.5);
     p.printLines(out_file, "lines");
-    p.shiftPoints(3.2);
+
+    p.printJackets(out_file, "beforeLineShiftingJackets");
+    p.shiftPoints(1.5);
     p.uniteAllPoints(1.25);
     p.printJackets(out_file, "finalJackets");
 
