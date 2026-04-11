@@ -57,9 +57,8 @@ struct BestFitPlane
 struct Line3D {
     Vector3d p;   // point on line
     Vector3d dir; // direction (not necessarily normalized)
-    //vector<int> origin;
 
-    //vector<int> planeId;
+
     Vector2d origin_planes;
 };
 struct mEdge {
@@ -89,7 +88,7 @@ struct RoofData {
     PointTable table;
     PointViewSet view; // contains the PointViewPtrs made from `table`
 
-
+    vector<Line3D> edges;
     Vector3d centroid;
 };
 struct MainRoof {
@@ -186,7 +185,7 @@ private:
 
 class PointReader {
 private:
-    bool print_progress = false;
+    
     StageFactory factory;
     PipelineManager manager;
     PointTable mainTable;
@@ -247,7 +246,53 @@ private:
     }
 
 
+    double cross2D(const Eigen::Vector2d& a, const Eigen::Vector2d& b) {
+        return a.x() * b.y() - a.y() * b.x();
+    }
 
+    // returns (x, y, avg_z)
+    std::optional<Eigen::Vector3d> intersectXYWithAvgZ(const Line3D& l1, const Line3D& l2) {
+        constexpr double EPS = 1e-9;
+
+        Eigen::Vector2d p = l1.p.head<2>();
+        Eigen::Vector2d r = l1.dir.head<2>();
+
+        Eigen::Vector2d q = l2.p.head<2>();
+        Eigen::Vector2d s = l2.dir.head<2>();
+
+        double denom = cross2D(r, s);
+
+        // parallel in XY projection
+        if (std::abs(denom) < EPS)
+            return std::nullopt;
+
+        Eigen::Vector2d qp = q - p;
+
+        double t = cross2D(qp, s) / denom;
+        double u = cross2D(qp, r) / denom;
+
+        Eigen::Vector2d xy = p + t * r;
+
+        double z1 = l1.p.z() + t * l1.dir.z();
+        double z2 = l2.p.z() + u * l2.dir.z();
+        double avgZ = 0.5 * (z1 + z2);
+
+        return Eigen::Vector3d(xy.x(), xy.y(), avgZ);
+    }
+
+    std::vector<Eigen::Vector3d> findAllIntersectionsXYWithAvgZ(const std::vector<Line3D>& lines) {
+        std::vector<Eigen::Vector3d> result;
+
+        for (size_t i = 0; i < lines.size(); ++i) {
+            for (size_t j = i + 1; j < lines.size(); ++j) {
+                auto inter = intersectXYWithAvgZ(lines[i], lines[j]);
+                if (inter)
+                    result.push_back(*inter);
+            }
+        }
+
+        return result;
+    }
 
 
 
@@ -310,8 +355,6 @@ private:
         }
     }
     void cluster(const vector<RoofData*>& roof, float tolerance, size_t min_points) {
-
-
         vector<thread> threads;
 
         Options opts;
@@ -320,7 +363,6 @@ private:
         for (int i = 0; i < roof.size(); ++i) {
             threads.emplace_back(&PointReader::worker, this, (int)i, opts, cref(roof));
         }
-
 
         for (auto& t : threads) {
             t.join(); // wait for all threads to finish
@@ -336,9 +378,6 @@ private:
         stage->setInput(reader);
         stage->prepare(rd.table);
         stage->execute(rd.table);
-
-
-        //std::cout << "Hello from thread " << id << "\n";
     }
     size_t printCloud(const PointViewSet& pvs, const string& filePath) {
 
@@ -649,9 +688,10 @@ private:
 
         line.dir = v;
     }
-    vector<Vector3d> findEdgePoints(string folder, vector<Vector3d> all_points, double ratio, double points_lower_limit, double points_upper_limit, bool& stop) {
+    vector<Vector3d> findEdgePoints(string folder, vector<Vector3d> all_points, double ratio, double points_lower_limit, double points_upper_limit, bool& stop, int ii, int jj) {
         for (int i = 0; i < all_points.size(); i++) {
             for (int j = i + 1; j < all_points.size(); j++) {
+
 
 
 
@@ -678,28 +718,54 @@ private:
                 points_count++;
 
 
+                
+				ratio = 0.5; //tighter ratio for second round, to get better line fit and thus better edge points
                 ////second round - better line fit
                 if (points_count > points_lower_limit) {
 
-                    points_count = 0;
-                    leastSquares(line_points, line);
-                    line_points.clear();
-                    for (int k = 0; k < all_points.size(); k++) {
-                        if (k != i && k != j) {
+
+					bool searching = true;
+                    while (searching) {
 
 
-                            Vector3d C = all_points[k];
-                            double d = distanceToLine(line, C);
-                            if (d < ratio) {
-                                line_points.push_back(C);
-                                points_count++;
+                        leastSquares(line_points, line);
+                        int previous_points_count = points_count;
+                        points_count = 0;
+                        line_points.clear();
 
+                        for (int k = 0; k < all_points.size(); k++) {
+                            if (k != i && k != j) {
+
+
+                                Vector3d C = all_points[k];
+                                double d = distanceToLine(line, C);
+                                if (d < ratio) {
+                                    line_points.push_back(C);
+                                    points_count++;
+
+                                }
                             }
                         }
-                    }
-                    if (points_count > points_upper_limit) {
                         line_points.push_back(all_points[i]);
                         line_points.push_back(all_points[j]);
+						points_count++;
+                        points_count++;
+
+                        if(points_count > previous_points_count){
+							searching = true;
+                        }
+                        else {
+							searching = false;
+                        }
+
+                    }
+
+                    
+
+
+
+                    if (points_count > points_upper_limit) {
+
 
                         ofstream out(folder);
                         out << std::fixed << std::setprecision(8);
@@ -707,6 +773,7 @@ private:
                         out << line.dir.x() << "," << line.dir.y() << "," << line.dir.z() << "\n";
                         out << '\n';
 
+						roofs[ii].fsubroof[jj]->edges.push_back(line);
                         return line_points;
                     }
                 }
@@ -773,7 +840,7 @@ private:
 public:
     PointViewSet buildpoint;
     vector<MainRoof> roofs;
-
+    bool print_progress;
 
 
     void printSchema(PointTable table)
@@ -865,6 +932,7 @@ public:
     Stage* filterWalls(Stage* input, string out_file, double ratio_curvature, double ratio_angle) {
         auto start = chrono::high_resolution_clock::now();
 
+
         WallFilter* my = new WallFilter();
         Options o;
         o.add("curvature", ratio_curvature);
@@ -883,7 +951,6 @@ public:
     }
     Stage* filterOutliers(Stage* input, string out_file, string method, size_t mean_k, float multiplier, float radius, size_t min_k) {
         auto start = chrono::high_resolution_clock::now();
-
 
 
         Stage& outlier = manager.makeFilter("filters.outlier", *input);
@@ -1162,7 +1229,6 @@ public:
     }
     void finalizeSubroofs() {
 
-
         for (int i = 0; i < roofs.size(); i++) {
 
             PointViewPtr msubroof = *roofs[i].msubroof->view.begin();
@@ -1172,8 +1238,7 @@ public:
             unordered_set<double> clusterIDs = getRoofsIDs(msubroof);
             double numClusters = clusterIDs.size();
 
-            cout << "Number of clusters for roof " << i + 1 << ": " << numClusters << endl;
-            cout << "msubroof->size() " << msubroof->size() << endl;
+           // cout << "Roof " << i + 1 << " --- contains " << numClusters << " subroofs" << endl;
 
             if (numClusters == 0) {
                 auto rd = std::make_unique<RoofData>();
@@ -1208,8 +1273,6 @@ public:
                 roofs[i].nsubroof.push_back(move(rd));
 				continue;
             }
-
-
 
             for (int l = 0; l < numClusters; l++) {
 
@@ -1255,17 +1318,7 @@ public:
                 rd->view.insert(view);
                 roofs[i].nsubroof.push_back(move(rd));
             }
-
         }
-
-
-
-        for (int i = 0; i < roofs.size(); i++) {
-            cout << "normal clustered roof " << i + 1 << " contains \t" << roofs[i].nsubroof.size() << " subroofs " << endl;
-        }
-
-
-
     }
     void clusterByPoints(float tolerance, size_t min_points) {
         cout << "Point clustering begins" << endl;
@@ -1294,6 +1347,7 @@ public:
     }
 
 
+        //PRINTING
     void printMainRoofs(const PointViewPtr& view, string out_file, string folder) {
      
         //getting number of clusters
@@ -1341,37 +1395,49 @@ public:
         ec.clear();
         filesystem::create_directories(dir);
 
-  
+        size_t total_points = 0;
         for (int i = 0; i < roofs.size(); i++) {
 
             string fileName = path + "/roof" + to_string(i + 1);
             filesystem::create_directories(fileName);
 
+
+
+			
             if (folder_name == "normalRoofs") {
 
+                cout << "Roof " << i + 1 << " --- contains " << roofs[i].nsubroof.size() << " normal clustered subroofs" << endl;
                 for (int j = 0; j < roofs[i].nsubroof.size(); j++) {
 
                     string lastname = fileName + "/subroof" + to_string(j + 1) + ".txt";
                     size_t n = printCloud(roofs[i].nsubroof[j]->view, lastname);
-                    cout << "roof " << i + 1 << " subroof " << j + 1 << " ----- " << n << endl;
+
+                    cout <<  n << " points" << endl;
+					total_points += n;
                 }
                 cout << " " << endl;
             }
             else if (folder_name == "finalRoofs") {
 
+                cout << "Roof " << i + 1 << " --- contains " << roofs[i].fsubroof.size() << " final subroofs" << endl;
                 for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
                     string lastname = fileName + "/subroof" + to_string(j + 1) + ".txt";
                     size_t n = printCloud(roofs[i].fsubroof[j]->view, lastname);
-                    cout << "roof " << i + 1 << " finalroof " << j + 1 << " ----- " << n << endl;
+                    cout << n << " points" << endl;
+                    total_points += n;
                 }
                 cout << " " << endl;
 
-
             }
-
-            
         }
+
+        cout << "Total points remaining:      " << total_points << endl;
+
+
+
+
+
     }
     void printCentroids(string out_file, string foldername) {
         string mainpath = out_file + "/" + foldername;
@@ -1585,9 +1651,6 @@ public:
     }
     void modifyJackets(string out_file) {
         auto start = std::chrono::high_resolution_clock::now();
-        
-
-
         string mainpath1 = out_file + "/withoutEdges";
         string mainpath2 = out_file + "/unitedPoints";
         string mainpath3 = out_file + "/leastSquaredLines";
@@ -1605,6 +1668,7 @@ public:
 			cout << "Modifying jackets of roof " << i + 1 << endl;
 
 
+            cout << "                                                   ROOOOF " << i + 1 << endl;
             for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
 
                 vector<Vector3d> jacket = roofs[i].jacket[j];
@@ -1614,12 +1678,23 @@ public:
 				string fp = path3 + "/jacket" + to_string(j + 1);
                 filesystem::create_directories(fp);
 
-                jacket = findStraightEdges(fp, jacket);
+                jacket = findStraightEdges(fp, jacket, i, j);
                 string fileName = path1 + "/jacket" + to_string(j + 1) + ".txt";
                 printJacketPoints(jacket, fileName);
                 
 
-                jacket = uniteClosePoints(jacket, 0.9);
+                cout << "subroof " << j + 1 << endl;
+                if (roofs[i].fsubroof[j]->edges.size() > 1) {
+                    jacket = findEdgeInterects(jacket, i, j);
+                }
+
+                
+                for (int k = 0; k < jacket.size(); k++)
+                {
+					cout << "intersection " << k + 1 << ": " << jacket[k].x() << "," << jacket[k].y() << "," << jacket[k].z() << endl;
+                }
+
+                //jacket = uniteClosePoints(jacket, 0.9);
                 fileName = path2 + "/jacket" + to_string(j + 1) + ".txt";
                 printJacketPoints(jacket, fileName);
 
@@ -1638,7 +1713,7 @@ public:
 
 
 
-    vector<Vector3d> findStraightEdges(string folder, vector<Vector3d> points) {
+    vector<Vector3d> findStraightEdges(string folder, vector<Vector3d> points, int i, int j) {
         double upper_limit = 0.20 * points.size();
         double lower_limit = 0.05 * points.size();
 		double distance_from_line = 0.5;
@@ -1657,7 +1732,7 @@ public:
         while (points0.size() > 0) {
 
             filename = folder + "/line" + to_string(count) + ".txt";
-            vector<Vector3d> localEdge = findEdgePoints(filename, points0, distance_from_line, lower_limit, upper_limit, stop);
+            vector<Vector3d> localEdge = findEdgePoints(filename, points0, distance_from_line, lower_limit, upper_limit, stop, i ,j);
 
             if (stop) {
                 rest_points = localEdge;
@@ -1678,16 +1753,15 @@ public:
         }
 
 
-
         stop = false;
-        upper_limit = 0.15 * rest_points.size();
+        upper_limit = 0.35 * rest_points.size();
         lower_limit = 0.05 * rest_points.size();
 
         //male hrany
         while (rest_points.size() > 0) {
 
             filename = folder + "/line" + to_string(count) + ".txt";
-            vector<Vector3d> localBorder = findEdgePoints(filename, rest_points, distance_from_line, lower_limit, upper_limit, stop);
+            vector<Vector3d> localBorder = findEdgePoints(filename, rest_points, distance_from_line, lower_limit, upper_limit, stop, i, j);
 
             if (stop) {
                 rest_points = localBorder;
@@ -1707,12 +1781,12 @@ public:
   
 
 
-        for (int i = 0; i < edge_points.size(); i++) {
-            Line3D line;
-            leastSquares(edge_points[i], line);
-            string filename = "lines/line" + to_string(i + 1) + ".txt";
-            //writeLineToFile(filename, line.p, line.dir);
-        }
+        //for (int i = 0; i < edge_points.size(); i++) {
+        //    Line3D line;
+        //    leastSquares(edge_points[i], line);
+        //    string filename = "lines/line" + to_string(i + 1) + ".txt";
+        //    //writeLineToFile(filename, line.p, line.dir);
+        //}
 
         for (int i = 0; i < edge_points.size(); i++) {
             Vector3d p1;
@@ -1752,6 +1826,70 @@ public:
 
         return result;
     }
+    vector<Vector3d> findEdgeInterects(vector<Vector3d> jacket,int ii, int jj) {
+    
+
+
+        cout << "roofs[i].fsubroof[j]->edges   " << roofs[ii].fsubroof[jj]->edges.size() << endl;
+        vector<Vector3d> intersections = findAllIntersectionsXYWithAvgZ(roofs[ii].fsubroof[jj]->edges);
+		vector<Vector3d> valid_intersections;
+
+
+        for (int i = 0; i < intersections.size(); i++)
+        {
+
+            cout << "intersections    " << i << " <<< " << intersections[i] << endl;
+            for (int j = 0; j < jacket.size(); j++)
+            {
+                double dist = (intersections[i] - jacket[j]).norm();
+                cout << "dist " << dist << endl;
+                if (dist < 1.5) {
+					valid_intersections.push_back(intersections[i]);
+
+                    break;
+				}
+
+
+            }
+
+        }
+
+
+		
+        for (int i = 0; i < jacket.size(); i++)
+        {
+
+            bool valid = true;
+            for (int j = 0; j < intersections.size(); j++)
+            {
+                double dist = (jacket[i] - intersections[j]).norm();
+                if (dist > 1.) {
+                    valid = true;
+                }
+                else {
+                    valid = false;
+					break;
+                }
+            }
+
+            if (valid) {
+                valid_intersections.push_back(jacket[i]);
+			}
+        }
+
+
+
+
+        cout << "valid_intersections   " << valid_intersections.size() << endl;
+        if(valid_intersections.size() == 0) {
+
+			valid_intersections = jacket;
+
+		}
+        return valid_intersections;
+    }
+
+
     vector<Vector3d> orderPoints(vector<Vector3d> jacket, Vector3d centroid) {
 
         Vector3d anchor_point = jacket[0];
@@ -1886,6 +2024,8 @@ public:
 
             for (int j = 0; j < mainroof_points.size(); j++) {
 
+
+				vector<double> distances;
                 for (int k = 0; k < roofs[i].lines.size(); k++)
                 {
 
@@ -1910,7 +2050,25 @@ public:
                         mainroof_points[j] = unite;
                     }
 
+
+					distances.push_back(dist);
                 }
+
+                /*if (roofs[i].lines.size() != 0) {
+                    int index = std::min_element(distances.begin(), distances.end()) - distances.begin();
+
+                    if (distances[index] < ratio) {
+                        Line3D line = roofs[i].lines[index];
+                        double denom = line.dir.dot(line.dir);
+                        double t = line.dir.dot(mainroof_points[j] - line.p) / denom;
+                        Vector3d unite = line.p + t * line.dir;
+                        mainroof_points[j] = unite;
+                    }
+                }*/
+
+                
+
+
             }
 
 
@@ -2047,7 +2205,7 @@ int main() {
     _putenv_s("GDAL_DATA", "C:\\vcpkg\\installed\\x64-windows\\share\\gdal");  
     auto start = chrono::high_resolution_clock::now();
     PointReader p;
-
+    p.print_progress = false;
     
     /*pdal::PointTable table;
     pdal::PointViewPtr view = loadXYZ_withReaderText(table, "C:/C/PointReader/build/finalRoofs/roof1/subroof2.txt");
@@ -2102,13 +2260,18 @@ int main() {
 
     Stage* stage;
     stage = p.loadFile("LiDAR.laz");
+   
+
     stage = p.filterClass6(stage, out_file);
     stage = p.computeNormals(stage, 16);
     stage = p.filterWalls(stage, out_file, 0.01, 20);
-    stage = p.filterOutliers(stage, out_file, "statistical", 6, 0.5, 1, 4);
-    stage = p.clusterPoints(stage, 0.25, 60);            //klasterizacia vsetkych bodov na hlavne strechy
+    stage = p.filterOutliers(stage, out_file, "statistical", 6, 0.5, 0.5, 30);
+    stage = p.clusterPoints(stage, 0.4, 300);            //klasterizacia vsetkych bodov na hlavne strechy
+
+    p.writeToTextFile(*stage, out_file + "/points_after_smoothing.txt");
     stage = p.zsmooth(stage, out_file, 1);
     p.execute(stage);
+    //p.printAllDimensions();
     //p.filerByZValue();
 
 
@@ -2116,9 +2279,9 @@ int main() {
 
     p.makePointViewSetRoofs();      //   buildpoint --> roofs
     p.modifySubroofs();
-    p.clusterByNormals(0.01, 50);            //klasterizacia podstriech na mensie podstrechy
+    p.clusterByNormals(0.01, 40);            //klasterizacia podstriech na mensie podstrechy
     p.finalizeSubroofs();
-    p.clusterByPoints(0.5, 70);
+    p.clusterByPoints(0.3, 70);
     p.endSubroofs();                    //filling PointViewSet fsubroofs
 
 
@@ -2152,7 +2315,7 @@ int main() {
 
     p.printJackets(out_file, "beforeLineShiftingJackets");
     p.shiftPoints(1.5);
-    p.uniteAllPoints(1.25);
+    p.uniteAllPoints(0.75);
     p.printJackets(out_file, "finalJackets");
 
 
