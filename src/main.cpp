@@ -1036,26 +1036,63 @@ public:
 
 
         //STAGES, all points
-    Stage* loadFile(string filepath) {
+    Stage* loadFiles(vector<string> filepaths) {
         auto start = chrono::high_resolution_clock::now();
 
-        Stage* reader = factory.createStage("readers.las");
-        Options opts;                                        ////options
-        opts.add("filename", filepath);
-        reader->setOptions(opts);
+        Stage* merge = factory.createStage("filters.merge");
 
+        for (const string& filepath : filepaths) {
+            Stage* reader = factory.createStage("readers.las");
+
+            Options opts;
+            opts.add("filename", filepath);
+            reader->setOptions(opts);
+
+            merge->setInput(*reader);
+        }
 
         PointTable table;
-        reader->prepare(table);
-        PointViewSet all_points = reader->execute(table);
+        merge->prepare(table);
 
-            //debug
-        auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-        if(print_progress){
-            cout << "\nLoading finished in " << duration.count()/1000. << " seconds\n";
-            cout << "Points remaining: " << get_points_size(all_points) << endl;
+        PointViewSet all_points = merge->execute(table);
+
+        auto duration = chrono::duration_cast<chrono::milliseconds>(
+            chrono::high_resolution_clock::now() - start
+        );
+
+        if (print_progress) {
+            cout << "\nLoading finished in "
+                << duration.count() / 1000.0
+                << " seconds\n";
+
+            cout << "Points remaining: "
+                << get_points_size(all_points)
+                << endl;
         }
-        return reader;       
+
+        return merge;
+
+
+
+        //auto start = chrono::high_resolution_clock::now();
+
+        //Stage* reader = factory.createStage("readers.las");
+        //Options opts;                                        ////options
+        //opts.add("filename", filepath);
+        //reader->setOptions(opts);
+
+
+        //PointTable table;
+        //reader->prepare(table);
+        //PointViewSet all_points = reader->execute(table);
+
+        //    //debug
+        //auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
+        //if(print_progress){
+        //    cout << "\nLoading finished in " << duration.count()/1000. << " seconds\n";
+        //    cout << "Points remaining: " << get_points_size(all_points) << endl;
+        //}
+        //return reader;       
     }
     Stage* filterClass6(Stage* input, string out_file) {
         auto start = chrono::high_resolution_clock::now();
@@ -1943,7 +1980,7 @@ public:
         }
 
     }
-    void findEdges(string out_file, string folder_name1, string folder_name2) {
+    void findEdges(string out_file, string folder_name1, string folder_name2, double distance_from_line) {
         string mainpath1 = out_file + "/" + folder_name1;
         string mainpath2 = out_file + "/" + folder_name2;
         
@@ -1972,7 +2009,7 @@ public:
        
 
 
-                jacket = ransac(fileName1, jacket, i, j);
+                jacket = ransac(fileName1, jacket, i, j, distance_from_line);
 
                 printJacketPoints(jacket, fileName2);
     
@@ -1983,7 +2020,7 @@ public:
         }
 
     }
-    void getCornerPoints(string out_file, string folder_name) {
+    void getCornerPoints(string out_file, string folder_name, double corner_tolerance) {
         string mainpath = out_file + "/" + folder_name;
         filesystem::create_directories(mainpath);
 		cout << "Finding corner points in jackets" << endl;
@@ -1998,7 +2035,7 @@ public:
 
                
                 if (roofs[i].fsubroof[j]->edges.size() > 1) {
-                    jacket = findEdgeInterects(jacket, i, j);
+                    jacket = findEdgeInterects(jacket, i, j, corner_tolerance);
                 }
                
 
@@ -2017,12 +2054,12 @@ public:
 
 
 
-    vector<BorderPoint> ransac(string folder, vector<BorderPoint> points, int i, int j) {
+    vector<BorderPoint> ransac(string folder, vector<BorderPoint> points, int i, int j, double distance_from_line) {
         cout << " ss " << points.size() << endl;
 
         double upper_limit = 0.05 * points.size();
         double lower_limit = 0.05 * points.size();
-		double distance_from_line = 0.5;
+
 
         vector<BorderPoint> points0 = points;
         vector<vector<BorderPoint>> edge_points;
@@ -2114,7 +2151,7 @@ public:
 
         return result;
     }
-    vector<BorderPoint> findEdgeInterects(vector<BorderPoint> jacket,int ii, int jj) {
+    vector<BorderPoint> findEdgeInterects(vector<BorderPoint> jacket,int ii, int jj, double corner_tolerance) {
     
         vector<Vector3d> intersections = findAllIntersectionsXYWithAvgZ(roofs[ii].fsubroof[jj]->edges);
 		vector<BorderPoint> valid_intersections;
@@ -2132,7 +2169,7 @@ public:
             for (int j = 0; j < jacket.size(); j++)
             {
                 double dist = (intersections[i] - jacket[j].point).norm();
-                if (dist < 1.5) {
+                if (dist < corner_tolerance) {
 
 					BorderPoint bp;
 					bp.point = intersections[i];
@@ -2160,7 +2197,7 @@ public:
             for (int j = 0; j < intersections.size(); j++)
             {
                 double dist = (jacket[i].point - intersections[j]).norm();
-                if (dist > 1.5) {
+                if (dist > (corner_tolerance + 1)) {
                     valid = true;
                 }
                 else {
@@ -2519,7 +2556,7 @@ int main() {
    
 
 
-    string out_file = "outputCurv";
+    string out_file = "outputMalacky";
     error_code ec;
     filesystem::path dir = out_file;
     ec.clear();
@@ -2529,7 +2566,17 @@ int main() {
 
 	    //FILTERING AND CLUSTERING
     Stage* stage;
-    stage = p.loadFile("LiDAR.laz");
+    //stage = p.loadFile("LiDAR.laz");
+    //stage = p.loadFile("malacky2.laz");
+    stage = p.loadFiles({
+        "malacky1.laz",
+        "malacky2.laz",
+        "malacky3.laz",
+        "malacky4.laz"
+    });
+
+
+
     stage = p.filterClass6(stage, out_file);
     stage = p.computeNormals(stage, 16);
     stage = p.filterWalls(stage, out_file, 0.05, 10);
@@ -2571,8 +2618,8 @@ int main() {
 	    //JACKETS
     p.printJackets(out_file, "rawJackets");
     p.getPlanePoints(out_file);
-	p.findEdges(out_file, "leastSquaredLines", "withoutEdges");
-	p.getCornerPoints(out_file, "cornerPoints");
+	p.findEdges(out_file, "leastSquaredLines", "withoutEdges", 0.4);
+	p.getCornerPoints(out_file, "cornerPoints", 1.);
 	//p.orderJacketPoints(out_file);
     
     
@@ -2585,6 +2632,8 @@ int main() {
 
     p.printJackets(out_file, "beforeLineShiftingJackets");
     p.shiftPoints(1.);
+
+    p.printJackets(out_file, "beforeUnion");
     p.uniteAllPoints(0.75);
     p.printJackets(out_file, "finalJackets");
 
