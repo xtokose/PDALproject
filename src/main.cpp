@@ -50,9 +50,9 @@ using namespace Eigen;
 struct BestFitPlane
 {
     
-    Eigen::Vector3d normal;   // unit-length (A,B,C)
+    Vector3d normal;   // unit-length (A,B,C)
     double d;                 // D in Ax + By + Cz + D = 0
-    Eigen::Vector3d centroid; // point on plane
+    Vector3d centroid; // point on plane
 };
 struct Line3D {
     Vector3d p;   // point on line
@@ -91,8 +91,8 @@ struct BorderPoint {
 
 struct MeshReadyView
 {
-    std::shared_ptr<pdal::PointTable> table; // must stay alive with the view
-    pdal::PointViewPtr view;
+    shared_ptr<PointTable> table; // must stay alive with the view
+    PointViewPtr view;
 };
 struct RoofData {
     PointTable table;
@@ -118,6 +118,7 @@ struct MainRoof {
     vector<MeshReadyView> mesh_ready_view;
     
     vector<vector<BorderPoint>> jacket;
+    vector<vector<BorderPoint>> initial_jacket;
 
 
 };
@@ -132,19 +133,19 @@ private:
     double ratio;
     vector<double> excludedZ;
 
-    void addArgs(pdal::ProgramArgs& args) override
+    void addArgs(ProgramArgs& args) override
     {
         args.add("curvature", "Curvature ratio threshold", m_curvature);
         args.add("angle", "Angle ratio threshold", m_angle);
     }
 
-    pdal::PointViewSet run(pdal::PointViewPtr in) override
+    PointViewSet run(PointViewPtr in) override
     {
         auto start = chrono::high_resolution_clock::now();
-        pdal::PointViewPtr out(new pdal::PointView(in->table()));
+        PointViewPtr out(new PointView(in->table()));
         ratio = sin(m_angle * PI / 180.0);
         
-        for (pdal::PointId i = 0; i < in->size(); ++i)
+        for (PointId i = 0; i < in->size(); ++i)
         {
             if (keep(*in, i))                 // your criteria
                 out->appendPoint(*in, i);     // copies all dimensions for point i
@@ -163,25 +164,17 @@ private:
 
 
 
-        pdal::PointViewSet s;
+        PointViewSet s;
         s.insert(out);
         return s;
     }
-    bool keep(const pdal::PointView& v, pdal::PointId i)
+    bool keep(const PointView& v, PointId i)
     {
         
-        const double nz = v.getFieldAs<double>(pdal::Dimension::Id::NormalZ, i);
-        const double curv = v.getFieldAs<double>(pdal::Dimension::Id::Curvature, i);
-
+        const double nz = v.getFieldAs<double>(Dimension::Id::NormalZ, i);
+        const double curv = v.getFieldAs<double>(Dimension::Id::Curvature, i);
 
         if (nz > ratio && curv < m_curvature) {
-            /*if (curv < m_curvature) {
-                return true;
-            }
-            else {
-				excludedZ.push_back(abs(nz));
-            }*/
-
             return true;
         }
         else {
@@ -243,8 +236,6 @@ private:
         }
         return set;
     }
-
-
     void writeLineToFile(const std::string& filename, const Vector3d& p0, const Vector3d& dir)
     {
         std::ofstream file(filename, std::ios::app);
@@ -259,40 +250,35 @@ private:
     double cross2D(const Eigen::Vector2d& a, const Eigen::Vector2d& b) {
         return a.x() * b.y() - a.y() * b.x();
     }
-
-    // returns (x, y, avg_z)
-    std::optional<Eigen::Vector3d> intersectXYWithAvgZ(const Line3D& l1, const Line3D& l2) {
+    optional<Vector3d> intersectXYWithAvgZ(const Line3D& l1, const Line3D& l2) {
         constexpr double EPS = 1e-9;
 
-        Eigen::Vector2d p = l1.p.head<2>();
-        Eigen::Vector2d r = l1.dir.head<2>();
+        Vector2d p = l1.p.head<2>();
+        Vector2d r = l1.dir.head<2>();
 
-        Eigen::Vector2d q = l2.p.head<2>();
-        Eigen::Vector2d s = l2.dir.head<2>();
-
+        Vector2d q = l2.p.head<2>();
+        Vector2d s = l2.dir.head<2>();
         double denom = cross2D(r, s);
 
         // parallel in XY projection
-        if (std::abs(denom) < EPS)
-            return std::nullopt;
+        if (abs(denom) < EPS)
+            return nullopt;
 
-        Eigen::Vector2d qp = q - p;
+        Vector2d qp = q - p;
 
         double t = cross2D(qp, s) / denom;
         double u = cross2D(qp, r) / denom;
 
-        Eigen::Vector2d xy = p + t * r;
+        Vector2d xy = p + t * r;
 
         double z1 = l1.p.z() + t * l1.dir.z();
         double z2 = l2.p.z() + u * l2.dir.z();
         double avgZ = 0.5 * (z1 + z2);
 
-        return Eigen::Vector3d(xy.x(), xy.y(), avgZ);
+        return Vector3d(xy.x(), xy.y(), avgZ);
     }
-
-    std::vector<Eigen::Vector3d> findAllIntersectionsXYWithAvgZ(const std::vector<Line3D>& lines) {
-        std::vector<Eigen::Vector3d> result;
-
+    vector<Vector3d> findAllIntersectionsXYWithAvgZ(const vector<Line3D>& lines) {
+        vector<Vector3d> result;
         for (size_t i = 0; i < lines.size(); ++i) {
             for (size_t j = i + 1; j < lines.size(); ++j) {
                 auto inter = intersectXYWithAvgZ(lines[i], lines[j]);
@@ -378,7 +364,7 @@ private:
             t.join(); // wait for all threads to finish
         }
     }
-    void worker(int id, Options opts, const std::vector<RoofData*>& roof) {
+    void worker(int id, Options opts, const vector<RoofData*>& roof) {
         Stage* stage = factory.createStage("filters.cluster");
         auto& rd = *roof[id];
         BufferReader reader;
@@ -1006,7 +992,7 @@ public:
     PointViewSet buildpoint;
     vector<MainRoof> roofs;
     bool print_progress;
-
+    size_t number_of_points;
 
     void printSchema(PointTable table)
     {
@@ -1060,6 +1046,7 @@ public:
             chrono::high_resolution_clock::now() - start
         );
 
+		number_of_points = get_points_size(all_points);
         if (print_progress) {
             cout << "\nLoading finished in "
                 << duration.count() / 1000.0
@@ -1071,28 +1058,6 @@ public:
         }
 
         return merge;
-
-
-
-        //auto start = chrono::high_resolution_clock::now();
-
-        //Stage* reader = factory.createStage("readers.las");
-        //Options opts;                                        ////options
-        //opts.add("filename", filepath);
-        //reader->setOptions(opts);
-
-
-        //PointTable table;
-        //reader->prepare(table);
-        //PointViewSet all_points = reader->execute(table);
-
-        //    //debug
-        //auto duration = chrono::duration_cast<chrono::milliseconds>(chrono::high_resolution_clock::now() - start);
-        //if(print_progress){
-        //    cout << "\nLoading finished in " << duration.count()/1000. << " seconds\n";
-        //    cout << "Points remaining: " << get_points_size(all_points) << endl;
-        //}
-        //return reader;       
     }
     Stage* filterClass6(Stage* input, string out_file) {
         auto start = chrono::high_resolution_clock::now();
@@ -1756,8 +1721,7 @@ public:
 
 
 
-    double computePlaneRMSE(const BestFitPlane& plane,
-        const std::vector<BorderPoint>& points)
+    double computePlaneRMSE(const BestFitPlane& plane, const vector<BorderPoint>& points)
     {
         if (points.empty())
             throw std::runtime_error("points is empty");
@@ -1872,7 +1836,7 @@ public:
                 vector<int> jacketIDs = hollowMesh(*roofs[i].fsubroof[j]->view.begin(), m, xx);
 
                 roofs[i].jacket.push_back(createJacket(*roofs[i].fsubroof[j]->view.begin(), jacketIDs));
-
+				roofs[i].initial_jacket.push_back(roofs[i].jacket[j]);
 
 
                 cout << "JACKET SIZE    " << roofs[i].jacket[j].size() << endl;
@@ -2151,18 +2115,15 @@ public:
 
         return result;
     }
-    vector<BorderPoint> findEdgeInterects(vector<BorderPoint> jacket,int ii, int jj, double corner_tolerance) {
+    vector<BorderPoint> findEdgeInterects(vector<BorderPoint> rest_jacket, int ii, int jj, double corner_tolerance) {
     
+		vector<BorderPoint> jacket = roofs[ii].initial_jacket[jj];
+
         vector<Vector3d> intersections = findAllIntersectionsXYWithAvgZ(roofs[ii].fsubroof[jj]->edges);
 		vector<BorderPoint> valid_intersections;
 
+		//intersections that are close to jacket points are valid, rest are not
         cout << "----------------------BEFORE  " << endl;
-        for (int k = 0; k < jacket.size(); k++)
-        {
-            cout << "order " << jacket[k].order << "   point " << endl;
-        }
-
-
         for (int i = 0; i < intersections.size(); i++)
         {
 
@@ -2183,21 +2144,18 @@ public:
             }
 
         }
-        cout << "intersections  " << endl;
-        for (int k = 0; k < intersections.size(); k++)
-        {
-            cout << "int " << intersections[k].x() << "   point " << endl;
-        }
 
-		
-        for (int i = 0; i < jacket.size(); i++)
+
+
+		//rest points that are far from intersections
+        for (int i = 0; i < rest_jacket.size(); i++)
         {
 
             bool valid = true;
             for (int j = 0; j < intersections.size(); j++)
             {
-                double dist = (jacket[i].point - intersections[j]).norm();
-                if (dist > (corner_tolerance + 1)) {
+                double dist = (rest_jacket[i].point - intersections[j]).norm();
+                if (dist > corner_tolerance ) {
                     valid = true;
                 }
                 else {
@@ -2208,7 +2166,7 @@ public:
 
             if (valid) {
 
-                valid_intersections.push_back(jacket[i]);
+                valid_intersections.push_back(rest_jacket[i]);
 			}
         }
 
@@ -2231,7 +2189,7 @@ public:
     }
     vector<BorderPoint> orderPoints(vector<BorderPoint> jacket) {
 
-        std::sort(jacket.begin(), jacket.end(),
+        sort(jacket.begin(), jacket.end(),
             [](const BorderPoint& a, const BorderPoint& b) {
                 return a.order < b.order;   // smallest -> largest
             });
@@ -2284,7 +2242,7 @@ public:
         }*/
     }
     void computeLines(double ratio) {
-        unsigned int threadCount = std::thread::hardware_concurrency();
+        unsigned int threadCount = thread::hardware_concurrency();
         if (threadCount == 0) threadCount = 4;   // fallback
 
         threadCount = (std::min)(threadCount, (unsigned int)roofs.size());
@@ -2326,6 +2284,7 @@ public:
             }
 
 
+
             for (int j = 0; j < mainroof_points.size(); j++) {
 
 
@@ -2342,11 +2301,24 @@ public:
                     }
                     double dist = (mainroof_points[j] - line.p).cross(line.dir).norm() / denom;
 
+                    if (i == 14) {
+						cout << "---------dist " << dist << endl;
+                    }
+
 
                     if (dist < ratio) {
+
+                        if (i == 14) {
+                            cout << "bef  " << mainroof_points[j] << endl;
+                        }
                         double t = line.dir.dot(mainroof_points[j] - line.p) / denom;
                         Vector3d unite = line.p + t * line.dir;
                         mainroof_points[j] = unite;
+
+                        if (i == 14) {
+                            cout << "aft  " << mainroof_points[j] << endl;
+                        }
+                        
                     }
 
 
@@ -2462,33 +2434,19 @@ public:
             }
         }
     }
+    size_t getFinalSize() {
 
+        int count = 0;
 
-
-    void checkSmoothenssQuality() {
-
-       /* for (int i = 0; i < roofs.size(); i++) {
-
-           
-            for (int j = 0; j < roofs[i].fsubroof.size(); j++) {
-
-                vector<Vector3d> points;
-				PointViewPtr view = *roofs[i].fsubroof[j]->view.begin();
-                for (int k = 0; k < view->size(); k++)
-                {
-                    double x = view->getFieldAs<double>(Dimension::Id::X, k);
-                    double y = view->getFieldAs<double>(Dimension::Id::Y, k);
-                    double z = view->getFieldAs<double>(Dimension::Id::Z, k);
-                    points.push_back(Vector3d(x, y, z));
-                }
-
-                double rmse = computePlaneRMSE(roofs[i].plane[j], points);
-                cout << "Roof " << i + 1 << " Subroof " << j + 1 << " RMSE: " << rmse << endl;
+        for (int i = 0; i < roofs.size(); i++) {
+            
+            for (int j = 0; j < roofs[i].jacket.size(); j++) {
+                count += roofs[i].jacket[j].size();
             }
-        }*/
-	}
+        }
 
-
+		return count;
+    }
 };
 
 
@@ -2528,35 +2486,8 @@ int main() {
     PointReader p;
     p.print_progress = true;
     
-    /*pdal::PointTable table;
-    pdal::PointViewPtr view = loadXYZ_withReaderText(table, "C:/C/PointReader/build/finalRoofs/roof1/subroof2.txt");
-    cout << "size " << view->size() << endl;
 
-
-    auto clean = p.makeMeshReadyViewDeep(view);
-    clean = p.buildDelaunayMesh(clean);
-    TriangularMesh* mesh = clean.view->mesh("");
-
-    TriangularMesh nm = p.cutMesh(clean.view, mesh, 1);
-    p.attachTriangularMesh(clean.view, nm);
-
-
-  
-    vector<int> k = p.hollowMesh(view, nm);
-    p.getBorder(view, &k, "hranicka.txt");
-	vector<Vector3d> jacket = p.createJacket(view, k);
-	
-    jacket = p.clipBorder(jacket);
-    cout << "jacket size " << jacket.size() << endl;
-    jacket = p.uniteClosePoints(jacket, 2.);
-    jacket = p.orderPoints(jacket);
-
-    cout << "jacket size " << jacket.size() << endl;
-    p.printPoints(jacket, "finalJacket.txt");*/
-   
-
-
-    string out_file = "outputMalacky";
+    string out_file = "outputTestFile";
     error_code ec;
     filesystem::path dir = out_file;
     ec.clear();
@@ -2566,14 +2497,8 @@ int main() {
 
 	    //FILTERING AND CLUSTERING
     Stage* stage;
-    //stage = p.loadFile("LiDAR.laz");
-    //stage = p.loadFile("malacky2.laz");
-    stage = p.loadFiles({
-        "malacky1.laz",
-        "malacky2.laz",
-        "malacky3.laz",
-        "malacky4.laz"
-    });
+    //stage = p.loadFiles({"a1.laz", "a2.laz", "a3.laz" });
+    stage = p.loadFiles({ "LiDAR.laz" });
 
 
 
@@ -2587,7 +2512,7 @@ int main() {
     //p.printAllDimensions();
     p.makePointViewSetRoofs();      //   buildpoint --> roofs
     p.modifySubroofs();
-    p.clusterByNormals(0.01, 70);            //klasterizacia podstriech na mensie podstrechy
+    p.clusterByNormals(0.005, 70);            //klasterizacia podstriech na mensie podstrechy
     p.finalizeSubroofs();
     p.clusterByPoints(0.4, 70);
     p.endSubroofs();                    //filling PointViewSet fsubroofs
@@ -2596,8 +2521,6 @@ int main() {
 
     p.calculateCentroid();
     p.computatePlanes();
-    p.checkSmoothenssQuality();
-
 
 
 	    //PRINTING
@@ -2619,9 +2542,8 @@ int main() {
     p.printJackets(out_file, "rawJackets");
     p.getPlanePoints(out_file);
 	p.findEdges(out_file, "leastSquaredLines", "withoutEdges", 0.4);
-	p.getCornerPoints(out_file, "cornerPoints", 1.);
-	//p.orderJacketPoints(out_file);
-    
+	p.getCornerPoints(out_file, "cornerPoints", 0.75);
+
     
     p.printJackets(out_file, "orderedJackets");
 
@@ -2631,12 +2553,15 @@ int main() {
     p.printLines(out_file, "lines");
 
     p.printJackets(out_file, "beforeLineShiftingJackets");
-    p.shiftPoints(1.);
+    p.shiftPoints(3.5);
 
     p.printJackets(out_file, "beforeUnion");
-    p.uniteAllPoints(0.75);
+    p.uniteAllPoints(1.);
+
     p.printJackets(out_file, "finalJackets");
 
+
+	cout << "Points size reduced from " << p.number_of_points << " to " << p.getFinalSize() << endl;
 
 
 
